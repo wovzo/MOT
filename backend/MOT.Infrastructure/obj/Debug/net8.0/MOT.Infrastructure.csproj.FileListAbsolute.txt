@@ -1,0 +1,6 @@
+/Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/MOT.Infrastructure.csproj.AssemblyReference.cache
+/Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/MOT.Infrastructure.GeneratedMSBuildEditorConfig.editorconfig
+/Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/MOT.Infrastructure.AssemblyInfoInputs.cache
+/Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/MOT.Infrastructure.AssemblyInfo.cs
+/Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/MOT.Infrastructure.csproj.CoreCompileInputs.cache
+/Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/MOT.Infrastructure.sourcelink.json

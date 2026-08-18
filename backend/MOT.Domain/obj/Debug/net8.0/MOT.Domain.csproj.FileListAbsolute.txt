@@ -1,0 +1,12 @@
+/Users/apple/MOT/backend/MOT.Domain/bin/Debug/net8.0/MOT.Domain.deps.json
+/Users/apple/MOT/backend/MOT.Domain/bin/Debug/net8.0/MOT.Domain.dll
+/Users/apple/MOT/backend/MOT.Domain/bin/Debug/net8.0/MOT.Domain.pdb
+/Users/apple/MOT/backend/MOT.Domain/obj/Debug/net8.0/MOT.Domain.GeneratedMSBuildEditorConfig.editorconfig
+/Users/apple/MOT/backend/MOT.Domain/obj/Debug/net8.0/MOT.Domain.AssemblyInfoInputs.cache
+/Users/apple/MOT/backend/MOT.Domain/obj/Debug/net8.0/MOT.Domain.AssemblyInfo.cs
+/Users/apple/MOT/backend/MOT.Domain/obj/Debug/net8.0/MOT.Domain.csproj.CoreCompileInputs.cache
+/Users/apple/MOT/backend/MOT.Domain/obj/Debug/net8.0/MOT.Domain.sourcelink.json
+/Users/apple/MOT/backend/MOT.Domain/obj/Debug/net8.0/MOT.Domain.dll
+/Users/apple/MOT/backend/MOT.Domain/obj/Debug/net8.0/refint/MOT.Domain.dll
+/Users/apple/MOT/backend/MOT.Domain/obj/Debug/net8.0/MOT.Domain.pdb
+/Users/apple/MOT/backend/MOT.Domain/obj/Debug/net8.0/ref/MOT.Domain.dll

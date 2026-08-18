@@ -1,7 +1,7 @@
 {
   "version": 2,
-  "dgSpecHash": "WEoe5Jqt4vk=",
-  "success": false,
+  "dgSpecHash": "GKihTKybx6s=",
+  "success": true,
   "projectFilePath": "/Users/apple/MOT/backend/MOT.Infrastructure/MOT.Infrastructure.csproj",
   "expectedPackageFiles": [
     "/Users/apple/.nuget/packages/fluentvalidation/11.9.0/fluentvalidation.11.9.0.nupkg.sha512",
@@ -16,10 +16,10 @@
     "/Users/apple/.nuget/packages/microsoft.codeanalysis.csharp.workspaces/4.5.0/microsoft.codeanalysis.csharp.workspaces.4.5.0.nupkg.sha512",
     "/Users/apple/.nuget/packages/microsoft.codeanalysis.workspaces.common/4.5.0/microsoft.codeanalysis.workspaces.common.4.5.0.nupkg.sha512",
     "/Users/apple/.nuget/packages/microsoft.data.sqlite.core/8.0.4/microsoft.data.sqlite.core.8.0.4.nupkg.sha512",
-    "/Users/apple/.nuget/packages/microsoft.entityframeworkcore/8.0.2/microsoft.entityframeworkcore.8.0.2.nupkg.sha512",
-    "/Users/apple/.nuget/packages/microsoft.entityframeworkcore.abstractions/8.0.2/microsoft.entityframeworkcore.abstractions.8.0.2.nupkg.sha512",
-    "/Users/apple/.nuget/packages/microsoft.entityframeworkcore.analyzers/8.0.2/microsoft.entityframeworkcore.analyzers.8.0.2.nupkg.sha512",
-    "/Users/apple/.nuget/packages/microsoft.entityframeworkcore.design/8.0.2/microsoft.entityframeworkcore.design.8.0.2.nupkg.sha512",
+    "/Users/apple/.nuget/packages/microsoft.entityframeworkcore/8.0.4/microsoft.entityframeworkcore.8.0.4.nupkg.sha512",
+    "/Users/apple/.nuget/packages/microsoft.entityframeworkcore.abstractions/8.0.4/microsoft.entityframeworkcore.abstractions.8.0.4.nupkg.sha512",
+    "/Users/apple/.nuget/packages/microsoft.entityframeworkcore.analyzers/8.0.4/microsoft.entityframeworkcore.analyzers.8.0.4.nupkg.sha512",
+    "/Users/apple/.nuget/packages/microsoft.entityframeworkcore.design/8.0.4/microsoft.entityframeworkcore.design.8.0.4.nupkg.sha512",
     "/Users/apple/.nuget/packages/microsoft.entityframeworkcore.relational/8.0.4/microsoft.entityframeworkcore.relational.8.0.4.nupkg.sha512",
     "/Users/apple/.nuget/packages/microsoft.entityframeworkcore.sqlite/8.0.4/microsoft.entityframeworkcore.sqlite.8.0.4.nupkg.sha512",
     "/Users/apple/.nuget/packages/microsoft.entityframeworkcore.sqlite.core/8.0.4/microsoft.entityframeworkcore.sqlite.core.8.0.4.nupkg.sha512",
@@ -55,15 +55,5 @@
     "/Users/apple/.nuget/packages/system.text.json/8.0.0/system.text.json.8.0.0.nupkg.sha512",
     "/Users/apple/.nuget/packages/system.threading.channels/6.0.0/system.threading.channels.6.0.0.nupkg.sha512"
   ],
-  "logs": [
-    {
-      "code": "NU1605",
-      "level": "Error",
-      "message": "Warning As Error: Detected package downgrade: Microsoft.EntityFrameworkCore from 8.0.4 to 8.0.2. Reference the package directly from the project to select a different version. \n MOT.Infrastructure -> Microsoft.EntityFrameworkCore.Sqlite 8.0.4 -> Microsoft.EntityFrameworkCore.Sqlite.Core 8.0.4 -> Microsoft.EntityFrameworkCore.Relational 8.0.4 -> Microsoft.EntityFrameworkCore (>= 8.0.4) \n MOT.Infrastructure -> Microsoft.EntityFrameworkCore (>= 8.0.2)",
-      "libraryId": "Microsoft.EntityFrameworkCore",
-      "targetGraphs": [
-        "net8.0"
-      ]
-    }
-  ]
+  "logs": []
 }
