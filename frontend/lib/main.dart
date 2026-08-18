@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/theme.dart';
+import 'features/auth/presentation/screens/splash_screen.dart';
 
 void main() {
   runApp(
@@ -20,11 +21,7 @@ class MindOnTrackApp extends StatelessWidget {
       theme: AppTheme.darkTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.dark, // Enforce dark mode by default
-      home: const Scaffold(
-        body: Center(
-          child: Text('Mind on Track - MVP Scaffolding'),
-        ),
-      ),
+      home: const SplashScreen(),
     );
   }
 }
