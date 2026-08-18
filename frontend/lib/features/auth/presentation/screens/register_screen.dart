@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../shared/widgets/custom_text_field.dart';
 import '../../../../shared/widgets/primary_button.dart';
 import '../providers/auth_provider.dart';
+import '../../onboarding/presentation/screens/onboarding_screen.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -23,7 +24,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       final repo = ref.read(authRepositoryProvider);
       await repo.register(_emailController.text, _passwordController.text, _nameController.text);
       ref.read(authStateProvider.notifier).state = true;
-      // Navigate to Home or Onboarding
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+        );
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
     } finally {

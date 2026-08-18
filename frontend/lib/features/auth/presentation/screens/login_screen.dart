@@ -4,6 +4,7 @@ import '../../../../shared/widgets/custom_text_field.dart';
 import '../../../../shared/widgets/primary_button.dart';
 import '../providers/auth_provider.dart';
 import 'register_screen.dart';
+import '../../profile/presentation/screens/profile_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -23,7 +24,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       final repo = ref.read(authRepositoryProvider);
       await repo.login(_emailController.text, _passwordController.text);
       ref.read(authStateProvider.notifier).state = true;
-      // Navigate to Home
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const ProfileScreen()),
+        );
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
     } finally {
