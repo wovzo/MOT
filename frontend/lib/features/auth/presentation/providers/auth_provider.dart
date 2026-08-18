@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/network_client.dart';
-import '../data/auth_repository.dart';
+import '../../data/auth_repository.dart';
 
 final networkClientProvider = Provider((ref) => NetworkClient());
 
