@@ -4,7 +4,7 @@ import '../../../../shared/widgets/custom_text_field.dart';
 import '../../../../shared/widgets/primary_button.dart';
 import '../providers/auth_provider.dart';
 import 'register_screen.dart';
-import '../../profile/presentation/screens/profile_screen.dart';
+import '../../../profile/presentation/screens/profile_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
