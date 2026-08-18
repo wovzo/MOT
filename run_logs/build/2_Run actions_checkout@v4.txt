@@ -1,0 +1,74 @@
+﻿2026-08-18T16:32:07.6771766Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-08-18T16:32:07.6782778Z ##[group]Run actions/checkout@v4
+2026-08-18T16:32:07.6784035Z with:
+2026-08-18T16:32:07.6784812Z   repository: wovzo/MOT
+2026-08-18T16:32:07.6793444Z   token: ***
+2026-08-18T16:32:07.6794233Z   ssh-strict: true
+2026-08-18T16:32:07.6795039Z   ssh-user: git
+2026-08-18T16:32:07.6795840Z   persist-credentials: true
+2026-08-18T16:32:07.6796754Z   clean: true
+2026-08-18T16:32:07.6797572Z   sparse-checkout-cone-mode: true
+2026-08-18T16:32:07.6798535Z   fetch-depth: 1
+2026-08-18T16:32:07.6799501Z   fetch-tags: false
+2026-08-18T16:32:07.6800310Z   show-progress: true
+2026-08-18T16:32:07.6801109Z   lfs: false
+2026-08-18T16:32:07.6801906Z   submodules: false
+2026-08-18T16:32:07.6802759Z   set-safe-directory: true
+2026-08-18T16:32:07.6803670Z   allow-unsafe-pr-checkout: false
+2026-08-18T16:32:07.6804928Z ##[endgroup]
+2026-08-18T16:32:07.8015655Z Syncing repository: wovzo/MOT
+2026-08-18T16:32:07.8020182Z ##[group]Getting Git version info
+2026-08-18T16:32:07.8022215Z Working directory is '/home/runner/work/MOT/MOT'
+2026-08-18T16:32:07.8026798Z [command]/usr/bin/git version
+2026-08-18T16:32:07.8028506Z git version 2.54.0
+2026-08-18T16:32:07.8033989Z ##[endgroup]
+2026-08-18T16:32:07.8043074Z Temporarily overriding HOME='/home/runner/work/_temp/4ed6deb3-9df8-4c07-a6b3-439803679a24' before making global git config changes
+2026-08-18T16:32:07.8045997Z Adding repository directory to the temporary git global config as a safe directory
+2026-08-18T16:32:07.8047953Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/MOT/MOT
+2026-08-18T16:32:07.8088310Z Deleting the contents of '/home/runner/work/MOT/MOT'
+2026-08-18T16:32:07.8093743Z ##[group]Initializing the repository
+2026-08-18T16:32:07.8098392Z [command]/usr/bin/git init /home/runner/work/MOT/MOT
+2026-08-18T16:32:07.8190147Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-08-18T16:32:07.8193170Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-08-18T16:32:07.8196706Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-08-18T16:32:07.8200664Z hint: call:
+2026-08-18T16:32:07.8202273Z hint:
+2026-08-18T16:32:07.8204043Z hint: 	git config --global init.defaultBranch <name>
+2026-08-18T16:32:07.8206328Z hint:
+2026-08-18T16:32:07.8208585Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-08-18T16:32:07.8212230Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-08-18T16:32:07.8214775Z hint:
+2026-08-18T16:32:07.8216495Z hint: 	git branch -m <name>
+2026-08-18T16:32:07.8217615Z hint:
+2026-08-18T16:32:07.8219252Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-08-18T16:32:07.8222471Z Initialized empty Git repository in /home/runner/work/MOT/MOT/.git/
+2026-08-18T16:32:07.8227606Z [command]/usr/bin/git remote add origin https://github.com/wovzo/MOT
+2026-08-18T16:32:07.8261267Z ##[endgroup]
+2026-08-18T16:32:07.8264055Z ##[group]Disabling automatic garbage collection
+2026-08-18T16:32:07.8266092Z [command]/usr/bin/git config --local gc.auto 0
+2026-08-18T16:32:07.8298169Z ##[endgroup]
+2026-08-18T16:32:07.8300519Z ##[group]Setting up auth
+2026-08-18T16:32:07.8305201Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-08-18T16:32:07.8361863Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-08-18T16:32:07.8709573Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-08-18T16:32:07.8757598Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-08-18T16:32:07.9011794Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-08-18T16:32:07.9051298Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-08-18T16:32:07.9280342Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-08-18T16:32:07.9321513Z ##[endgroup]
+2026-08-18T16:32:07.9324079Z ##[group]Fetching the repository
+2026-08-18T16:32:07.9335078Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +6f7e39fafc8c2b1fd298a9d7150f95668a9cf1fb:refs/remotes/origin/main
+2026-08-18T16:32:08.2736139Z From https://github.com/wovzo/MOT
+2026-08-18T16:32:08.2738377Z  * [new ref]         6f7e39fafc8c2b1fd298a9d7150f95668a9cf1fb -> origin/main
+2026-08-18T16:32:08.2768723Z ##[endgroup]
+2026-08-18T16:32:08.2769766Z ##[group]Determining the checkout info
+2026-08-18T16:32:08.2772119Z ##[endgroup]
+2026-08-18T16:32:08.2777695Z [command]/usr/bin/git sparse-checkout disable
+2026-08-18T16:32:08.2827598Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-08-18T16:32:08.2860288Z ##[group]Checking out the ref
+2026-08-18T16:32:08.2865223Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-08-18T16:32:08.2981869Z Switched to a new branch 'main'
+2026-08-18T16:32:08.2985078Z branch 'main' set up to track 'origin/main'.
+2026-08-18T16:32:08.2991640Z ##[endgroup]
+2026-08-18T16:32:08.3041466Z [command]/usr/bin/git log -1 --format=%H
+2026-08-18T16:32:08.3067638Z 6f7e39fafc8c2b1fd298a9d7150f95668a9cf1fb

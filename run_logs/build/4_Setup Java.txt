@@ -1,0 +1,40 @@
+﻿2026-08-18T16:32:40.0932883Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-08-18T16:32:40.0934493Z ##[group]Run actions/setup-java@v3
+2026-08-18T16:32:40.0934759Z with:
+2026-08-18T16:32:40.0934958Z   distribution: zulu
+2026-08-18T16:32:40.0935175Z   java-version: 17
+2026-08-18T16:32:40.0935380Z   java-package: jdk
+2026-08-18T16:32:40.0935587Z   check-latest: false
+2026-08-18T16:32:40.0935797Z   server-id: github
+2026-08-18T16:32:40.0936012Z   server-username: GITHUB_ACTOR
+2026-08-18T16:32:40.0936291Z   server-password: GITHUB_TOKEN
+2026-08-18T16:32:40.0936550Z   overwrite-settings: true
+2026-08-18T16:32:40.0936779Z   job-status: success
+2026-08-18T16:32:40.0939448Z   token: ***
+2026-08-18T16:32:40.0939683Z env:
+2026-08-18T16:32:40.0939985Z   FLUTTER_ROOT: /opt/hostedtoolcache/flutter/stable-3.19.6-x64/flutter
+2026-08-18T16:32:40.0940403Z   PUB_CACHE: /home/runner/.pub-cache
+2026-08-18T16:32:40.0940658Z ##[endgroup]
+2026-08-18T16:32:40.2524648Z ##[warning]setup-java v3 is deprecated and will no longer receive updates. Please migrate to actions/setup-java@v5.
+2026-08-18T16:32:40.2536706Z ##[group]Installed distributions
+2026-08-18T16:32:40.2539621Z Trying to resolve the latest version from remote
+2026-08-18T16:32:40.2666294Z (node:2444) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-08-18T16:32:40.2667207Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-08-18T16:32:40.3055646Z Resolved latest version as 17.0.20+8
+2026-08-18T16:32:40.3056339Z Trying to download...
+2026-08-18T16:32:40.3061629Z Downloading Java 17.0.20+8 (Zulu) from https://cdn.azul.com/zulu/bin/zulu17.68.19-ca-crac-jdk17.0.20-linux_x64.tar.gz ...
+2026-08-18T16:32:43.9145469Z Extracting Java archive...
+2026-08-18T16:32:43.9307895Z [command]/usr/bin/tar xz --warning=no-unknown-keyword -C /home/runner/work/_temp/61112a87-57e5-4006-8e0e-bb417f20e0e2 -f /home/runner/work/_temp/2e6cccf7-8fcc-4421-a368-c6269c5892e2
+2026-08-18T16:32:46.5544975Z Java 17.0.20+8 was downloaded
+2026-08-18T16:32:46.5545793Z Setting Java 17.0.20+8 as the default
+2026-08-18T16:32:46.5557790Z Creating toolchains.xml for JDK version 17 from zulu
+2026-08-18T16:32:46.5636358Z Writing to /home/runner/.m2/toolchains.xml
+2026-08-18T16:32:46.5637261Z 
+2026-08-18T16:32:46.5637970Z Java configuration:
+2026-08-18T16:32:46.5638718Z   Distribution: zulu
+2026-08-18T16:32:46.5639369Z   Version: 17.0.20+8
+2026-08-18T16:32:46.5639871Z   Path: /opt/hostedtoolcache/Java_Zulu_jdk/17.0.20-8/x64
+2026-08-18T16:32:46.5640297Z 
+2026-08-18T16:32:46.5640825Z ##[endgroup]
+2026-08-18T16:32:46.5656575Z Creating settings.xml with server-id: github
+2026-08-18T16:32:46.5660331Z Writing to /home/runner/.m2/settings.xml
