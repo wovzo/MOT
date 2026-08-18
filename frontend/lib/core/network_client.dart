@@ -5,7 +5,7 @@ class NetworkClient {
   final Dio _dio;
 
   NetworkClient() : _dio = Dio(BaseOptions(
-    baseUrl: 'https://localhost:7143/api/', // Change to correct backend port
+    baseUrl: 'http://localhost:5000/api/', // Changed to correct backend port
     connectTimeout: const Duration(seconds: 5),
     receiveTimeout: const Duration(seconds: 3),
   )) {

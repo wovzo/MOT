@@ -8,23 +8,36 @@ class AuthRepository {
   AuthRepository(this._networkClient);
 
   Future<void> login(String email, String password) async {
-    // MOCK LOGIN FOR PHASE 2 UI TESTING
-    await Future.delayed(const Duration(seconds: 1)); // Simulate network
-    if (email.isEmpty || password.isEmpty) {
-      throw Exception('Please enter email and password');
+    try {
+      final response = await _networkClient.dio.post('auth/login', data: {
+        'email': email,
+        'password': password,
+      });
+      final token = response.data['token'];
+      if (token != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('jwt_token', token);
+      }
+    } on DioException catch (e) {
+      throw Exception(e.response?.data?['error'] ?? 'Login failed');
     }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('jwt_token', 'mock_token_123');
   }
 
   Future<void> register(String email, String password, String displayName) async {
-    // MOCK REGISTER FOR PHASE 2 UI TESTING
-    await Future.delayed(const Duration(seconds: 1)); // Simulate network
-    if (email.isEmpty || password.isEmpty || displayName.isEmpty) {
-      throw Exception('Please fill all fields');
+    try {
+      final response = await _networkClient.dio.post('auth/register', data: {
+        'email': email,
+        'password': password,
+        'displayName': displayName,
+      });
+      final token = response.data['token'];
+      if (token != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('jwt_token', token);
+      }
+    } on DioException catch (e) {
+      throw Exception(e.response?.data?['error'] ?? 'Registration failed');
     }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('jwt_token', 'mock_token_123');
   }
 
   Future<void> logout() async {
