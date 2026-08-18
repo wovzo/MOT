@@ -5,7 +5,7 @@ class NetworkClient {
   final Dio _dio;
 
   NetworkClient() : _dio = Dio(BaseOptions(
-    baseUrl: 'http://10.0.2.2:5000/api/', // Changed to 10.0.2.2 for Android Emulator host access
+    baseUrl: 'http://192.168.31.44:5000/api/', // Using real WiFi IP address
     connectTimeout: const Duration(seconds: 5),
     receiveTimeout: const Duration(seconds: 3),
   )) {

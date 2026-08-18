@@ -54,7 +54,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 var app = builder.Build();
 
-app.Urls.Add("http://localhost:5000");
+app.Urls.Add("http://*:5000");
 
 if (app.Environment.IsDevelopment())
 {
