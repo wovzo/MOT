@@ -4,3 +4,17 @@
 /Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/MOT.Infrastructure.AssemblyInfo.cs
 /Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/MOT.Infrastructure.csproj.CoreCompileInputs.cache
 /Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/MOT.Infrastructure.sourcelink.json
+/Users/apple/MOT/backend/MOT.Infrastructure/bin/Debug/net8.0/MOT.Infrastructure.deps.json
+/Users/apple/MOT/backend/MOT.Infrastructure/bin/Debug/net8.0/MOT.Infrastructure.runtimeconfig.json
+/Users/apple/MOT/backend/MOT.Infrastructure/bin/Debug/net8.0/MOT.Infrastructure.dll
+/Users/apple/MOT/backend/MOT.Infrastructure/bin/Debug/net8.0/MOT.Infrastructure.pdb
+/Users/apple/MOT/backend/MOT.Infrastructure/bin/Debug/net8.0/MOT.Application.dll
+/Users/apple/MOT/backend/MOT.Infrastructure/bin/Debug/net8.0/MOT.Domain.dll
+/Users/apple/MOT/backend/MOT.Infrastructure/bin/Debug/net8.0/MOT.Application.pdb
+/Users/apple/MOT/backend/MOT.Infrastructure/bin/Debug/net8.0/MOT.Domain.pdb
+/Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/MOT.Infr.4207BF78.Up2Date
+/Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/MOT.Infrastructure.dll
+/Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/refint/MOT.Infrastructure.dll
+/Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/MOT.Infrastructure.pdb
+/Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/MOT.Infrastructure.genruntimeconfig.cache
+/Users/apple/MOT/backend/MOT.Infrastructure/obj/Debug/net8.0/ref/MOT.Infrastructure.dll
