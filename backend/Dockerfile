@@ -6,7 +6,7 @@ WORKDIR /App
 COPY . ./
 
 # Restore dependencies
-RUN dotnet restore MOT.sln
+RUN dotnet restore MOT.Api/MOT.Api.csproj
 
 # Build and publish the app
 RUN dotnet publish MOT.Api/MOT.Api.csproj -c Release -o out
