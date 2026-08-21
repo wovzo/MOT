@@ -5,7 +5,7 @@ class NetworkClient {
   final Dio _dio;
 
   NetworkClient() : _dio = Dio(BaseOptions(
-    baseUrl: 'http://192.168.31.44:5000/api/', // Using real WiFi IP address
+    baseUrl: 'https://mot-dalx.onrender.com/api/', // Using public Render URL
     connectTimeout: const Duration(seconds: 5),
     receiveTimeout: const Duration(seconds: 3),
   )) {
