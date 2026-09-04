@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/theme.dart';
 import '../../../../shared/widgets/primary_button.dart';
-import '../../../profile/presentation/screens/profile_screen.dart';
+import '../../../tasks/presentation/screens/task_dashboard_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -53,7 +53,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       
       if (mounted) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const ProfileScreen()),
+          MaterialPageRoute(builder: (_) => const TaskDashboardScreen()),
         );
       }
     } else {

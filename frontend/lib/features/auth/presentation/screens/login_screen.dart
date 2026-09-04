@@ -4,7 +4,7 @@ import '../../../../shared/widgets/custom_text_field.dart';
 import '../../../../shared/widgets/primary_button.dart';
 import '../providers/auth_provider.dart';
 import 'register_screen.dart';
-import '../../../profile/presentation/screens/profile_screen.dart';
+import '../../../tasks/presentation/screens/task_dashboard_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -26,7 +26,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       ref.read(authStateProvider.notifier).state = true;
       if (mounted) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const ProfileScreen()),
+          MaterialPageRoute(builder: (_) => const TaskDashboardScreen()),
         );
       }
     } catch (e) {
