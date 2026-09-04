@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import '../../../../core/network_client.dart';
-import 'models/daily_task.dart';
+import '../models/daily_task.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class TaskRepository {

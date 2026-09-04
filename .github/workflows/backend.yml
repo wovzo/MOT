@@ -26,10 +26,10 @@ jobs:
         dotnet-version: '8.0.x'
         
     - name: Restore dependencies
-      run: dotnet restore MOT.sln
+      run: dotnet restore MOT.Api/MOT.Api.csproj
       
     - name: Build
-      run: dotnet build MOT.sln --no-restore
+      run: dotnet build MOT.Api/MOT.Api.csproj --no-restore
       
     - name: Test
-      run: dotnet test MOT.sln --no-build --verbosity normal
+      run: dotnet test MOT.Tests/MOT.Tests.csproj --no-build --verbosity normal

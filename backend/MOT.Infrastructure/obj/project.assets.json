@@ -1160,7 +1160,8 @@
         "dependencies": {
           "FluentValidation.DependencyInjectionExtensions": "11.9.0",
           "MOT.Domain": "1.0.0",
-          "MediatR": "12.2.0"
+          "MediatR": "12.2.0",
+          "Microsoft.EntityFrameworkCore": "8.0.4"
         },
         "compile": {
           "bin/placeholder/MOT.Application.dll": {}

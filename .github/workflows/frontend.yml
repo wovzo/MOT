@@ -28,8 +28,6 @@ jobs:
       with:
         distribution: 'zulu'
         java-version: '17'
-    - name: Generate Native Folders
-      run: flutter create --project-name mind_on_track --org com.wovzo --platforms=android,ios .
     - name: Pub Get
       run: flutter pub get
     - name: Build APK

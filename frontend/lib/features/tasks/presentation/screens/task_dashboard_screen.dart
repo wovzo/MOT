@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/network_client.dart';
-import '../data/models/daily_task.dart';
-import '../data/repositories/task_repository.dart';
+import '../../data/models/daily_task.dart';
+import '../../data/repositories/task_repository.dart';
 
 class TaskDashboardScreen extends StatefulWidget {
   const TaskDashboardScreen({super.key});
