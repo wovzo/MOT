@@ -2,6 +2,7 @@ using System.Security.Claims;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Cors;
 using MOT.Application.Tasks.Commands;
 using MOT.Application.Tasks.Queries;
 
@@ -10,6 +11,7 @@ namespace MOT.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
+[EnableCors("AllowAll")]
 public class TasksController : ControllerBase
 {
     private readonly IMediator _mediator;
