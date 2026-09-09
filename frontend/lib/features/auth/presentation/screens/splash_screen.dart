@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme.dart';
 import '../providers/auth_provider.dart';
 import 'login_screen.dart';
-import '../../../tasks/presentation/screens/task_dashboard_screen.dart';
+import '../../../../core/presentation/screens/home_screen.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -28,7 +28,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
       ref.read(authStateProvider.notifier).state = true;
       if (mounted) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const TaskDashboardScreen()),
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
         );
       }
     } else {
