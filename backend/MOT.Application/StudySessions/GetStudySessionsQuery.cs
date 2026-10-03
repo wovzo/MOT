@@ -26,7 +26,9 @@ namespace MOT.Application.StudySessions
 
         public async Task<List<StudySessionDto>> Handle(GetStudySessionsQuery request, CancellationToken cancellationToken)
         {
-            var userId = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+            var userIdStr = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+            if (!Guid.TryParse(userIdStr, out var userId))
+                throw new UnauthorizedAccessException();
             
             return await _context.StudySessions
                 .Where(s => s.UserId == userId)

@@ -8,6 +8,10 @@ using MOT.Application.Validators;
 using MOT.Domain.Interfaces;
 using MOT.Infrastructure.Authentication;
 using MOT.Infrastructure.Persistence;
+using MOT.Application.Common.Interfaces;
+using MOT.Application.Common.Behaviors;
+using MediatR;
+using MOT.Api.Services;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -66,11 +70,19 @@ builder.Services.AddScoped<MOT.Application.Common.Interfaces.IAppDbContext>(prov
 
 builder.Services.AddScoped<IAuthRepository, AuthRepository>();
 builder.Services.AddScoped<IJwtProvider, JwtProvider>();
+builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 
-builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(RegisterRequest).Assembly));
+builder.Services.AddMediatR(cfg =>
+{
+    cfg.RegisterServicesFromAssembly(typeof(RegisterRequest).Assembly);
+    cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+});
 builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
 
-var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "SuperSecretKeyForMindOnTrackMVP123!@#";
+var jwtSecret = builder.Configuration["Jwt:Secret"] 
+                ?? throw new InvalidOperationException("JWT Secret is not configured in configuration or environment.");
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {

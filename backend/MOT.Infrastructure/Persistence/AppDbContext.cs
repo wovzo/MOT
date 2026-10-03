@@ -32,5 +32,16 @@ public class AppDbContext : DbContext, IAppDbContext
                   .WithMany()
                   .HasForeignKey(e => e.UserId);
         });
+
+        modelBuilder.Entity<StudySession>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade)
+                  .IsRequired();
+            entity.HasIndex(e => e.UserId);
+        });
     }
 }

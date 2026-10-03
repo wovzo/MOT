@@ -27,15 +27,12 @@ public class JwtProvider : IJwtProvider
         };
 
         var secret = _configuration["Jwt:Secret"];
-        var issuer = _configuration["Jwt:Issuer"];
-        var audience = _configuration["Jwt:Audience"];
+        var issuer = _configuration["Jwt:Issuer"] ?? "MOT.Api";
+        var audience = _configuration["Jwt:Audience"] ?? "MOT.Frontend";
 
-        if (string.IsNullOrEmpty(secret))
+        if (string.IsNullOrWhiteSpace(secret))
         {
-            // Fallback for MVP scaffolding if appsettings isn't loaded correctly
-            secret = "SuperSecretKeyForMindOnTrackMVP123!@#"; 
-            issuer = "MOT.Api";
-            audience = "MOT.Frontend";
+            throw new InvalidOperationException("JWT Secret is not configured.");
         }
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));

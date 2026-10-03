@@ -1,4 +1,5 @@
 using MediatR;
+using MOT.Application.Common.Exceptions;
 using MOT.Application.DTOs;
 using MOT.Domain.Entities;
 using MOT.Domain.Interfaces;
@@ -9,11 +10,13 @@ public class RegisterUserHandler : IRequestHandler<RegisterRequest, AuthResponse
 {
     private readonly IAuthRepository _authRepository;
     private readonly IJwtProvider _jwtProvider;
+    private readonly IPasswordHasher _passwordHasher;
 
-    public RegisterUserHandler(IAuthRepository authRepository, IJwtProvider jwtProvider)
+    public RegisterUserHandler(IAuthRepository authRepository, IJwtProvider jwtProvider, IPasswordHasher passwordHasher)
     {
         _authRepository = authRepository;
         _jwtProvider = jwtProvider;
+        _passwordHasher = passwordHasher;
     }
 
     public async Task<AuthResponse> Handle(RegisterRequest request, CancellationToken cancellationToken)
@@ -21,14 +24,14 @@ public class RegisterUserHandler : IRequestHandler<RegisterRequest, AuthResponse
         var isUnique = await _authRepository.IsEmailUniqueAsync(request.Email, cancellationToken);
         if (!isUnique)
         {
-            throw new Exception("Email is already registered."); // Simplified for MVP
+            throw new DuplicateEmailException(request.Email);
         }
 
         var user = new User
         {
             Email = request.Email,
             DisplayName = request.DisplayName,
-            // In a real app, password hashing happens here or in the repository
+            PasswordHash = _passwordHasher.HashPassword(request.Password)
         };
 
         var createdUser = await _authRepository.CreateUserAsync(user, cancellationToken);

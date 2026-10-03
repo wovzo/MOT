@@ -25,9 +25,13 @@ namespace MOT.Application.StudySessions
 
         public async Task<StudySessionDto> Handle(StartStudySessionCommand request, CancellationToken cancellationToken)
         {
+            var userIdStr = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+            if (!Guid.TryParse(userIdStr, out var userId))
+                throw new UnauthorizedAccessException();
+
             var session = new StudySession
             {
-                UserId = _currentUserService.UserId ?? throw new UnauthorizedAccessException(),
+                UserId = userId,
                 Title = request.Title,
                 StartTime = DateTime.UtcNow,
                 IsCompleted = false

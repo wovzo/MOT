@@ -25,7 +25,9 @@ namespace MOT.Application.StudySessions
 
         public async Task<StudySessionDto> Handle(EndStudySessionCommand request, CancellationToken cancellationToken)
         {
-            var userId = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+            var userIdStr = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+            if (!Guid.TryParse(userIdStr, out var userId))
+                throw new UnauthorizedAccessException();
             
             var session = await _context.StudySessions
                 .FirstOrDefaultAsync(s => s.Id == request.SessionId && s.UserId == userId, cancellationToken);

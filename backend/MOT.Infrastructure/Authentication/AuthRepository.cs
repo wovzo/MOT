@@ -27,9 +27,6 @@ public class AuthRepository : IAuthRepository
 
     public async Task<User> CreateUserAsync(User user, CancellationToken cancellationToken = default)
     {
-        // MVP Simulation: Hash the password. In production, use BCrypt.HashPassword.
-        user.PasswordHash = $"hashed_{user.PasswordHash}"; 
-        
         _context.Users.Add(user);
         await _context.SaveChangesAsync(cancellationToken);
         return user;
