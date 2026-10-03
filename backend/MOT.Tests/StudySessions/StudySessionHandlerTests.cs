@@ -4,8 +4,13 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using FluentValidation.Results;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Moq;
+using MOT.Api.Controllers;
+using MOT.Application.Common.Exceptions;
 using MOT.Application.Common.Interfaces;
 using MOT.Application.StudySessions;
 using MOT.Domain.Entities;
@@ -141,7 +146,7 @@ public class StudySessionHandlerTests
         Func<Task> act = async () => await handler.Handle(command, CancellationToken.None);
 
         // Assert
-        await act.Should().ThrowAsync<Exception>().WithMessage("Session not found");
+        await act.Should().ThrowAsync<StudySessionNotFoundException>().WithMessage($"*{sessionB.Id}*");
 
         sessionB.IsCompleted.Should().BeFalse();
         sessionB.EndTime.Should().BeNull();
@@ -221,4 +226,270 @@ public class StudySessionHandlerTests
 
         _sessions.Single().UserId.Should().Be(authenticatedUser);
     }
+
+    // ==========================================
+    // P0.2 - Active Study Session Query Tests
+    // ==========================================
+
+    [Fact]
+    public async Task GetActiveStudySession_WhenActiveSessionExists_ReturnsSessionForUser()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var activeSession = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Active Session",
+            StartTime = DateTime.UtcNow.AddMinutes(-20),
+            IsCompleted = false
+        };
+        var completedSession = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Old Completed Session",
+            StartTime = DateTime.UtcNow.AddHours(-2),
+            EndTime = DateTime.UtcNow.AddHours(-1),
+            DurationMinutes = 60,
+            IsCompleted = true
+        };
+        _sessions.AddRange(new[] { completedSession, activeSession });
+
+        var handler = new GetActiveStudySessionQueryHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        // Act
+        var result = await handler.Handle(new GetActiveStudySessionQuery(), CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Id.Should().Be(activeSession.Id);
+        result.Title.Should().Be("Active Session");
+        result.IsCompleted.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetActiveStudySession_WhenNoActiveSession_ReturnsNull()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var completedSession = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Completed Session",
+            StartTime = DateTime.UtcNow.AddHours(-1),
+            EndTime = DateTime.UtcNow,
+            DurationMinutes = 60,
+            IsCompleted = true
+        };
+        _sessions.Add(completedSession);
+
+        var handler = new GetActiveStudySessionQueryHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        // Act
+        var result = await handler.Handle(new GetActiveStudySessionQuery(), CancellationToken.None);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetActiveStudySession_DoesNotReturnOtherUsersActiveSession()
+    {
+        // Arrange
+        var userA = Guid.NewGuid();
+        var userB = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userA.ToString());
+
+        var userBActiveSession = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userB,
+            Title = "User B Active",
+            StartTime = DateTime.UtcNow.AddMinutes(-10),
+            IsCompleted = false
+        };
+        _sessions.Add(userBActiveSession);
+
+        var handler = new GetActiveStudySessionQueryHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        // Act
+        var result = await handler.Handle(new GetActiveStudySessionQuery(), CancellationToken.None);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    // ==========================================
+    // P0.2 - Validation Tests
+    // ==========================================
+
+    [Theory]
+    [InlineData("Valid Session Title")]
+    [InlineData("Deep Work")]
+    public void StartStudySessionValidator_WithValidTitle_PassesValidation(string title)
+    {
+        var validator = new StartStudySessionCommandValidator();
+        var command = new StartStudySessionCommand { Title = title };
+
+        var result = validator.Validate(command);
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    public void StartStudySessionValidator_WithEmptyTitle_FailsValidation(string? emptyTitle)
+    {
+        var validator = new StartStudySessionCommandValidator();
+        var command = new StartStudySessionCommand { Title = emptyTitle! };
+
+        var result = validator.Validate(command);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.PropertyName == "Title");
+    }
+
+    [Fact]
+    public void StartStudySessionValidator_WithTooLongTitle_FailsValidation()
+    {
+        var validator = new StartStudySessionCommandValidator();
+        var command = new StartStudySessionCommand { Title = new string('A', 101) };
+
+        var result = validator.Validate(command);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.PropertyName == "Title");
+    }
+
+    // ==========================================
+    // P0.2 - Error Semantics & Controller Tests
+    // ==========================================
+
+    [Fact]
+    public async Task EndStudySession_WhenNotFound_ThrowsStudySessionNotFoundException()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+        var nonExistentId = Guid.NewGuid();
+
+        var handler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var command = new EndStudySessionCommand { SessionId = nonExistentId };
+
+        // Act
+        Func<Task> act = async () => await handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<StudySessionNotFoundException>();
+        ex.WithMessage($"*{nonExistentId}*");
+    }
+
+    [Fact]
+    public async Task StudySessionsController_GetActive_WhenSessionExists_ReturnsOkResult()
+    {
+        // Arrange
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<StudySessionsController>>();
+        var expectedDto = new StudySessionDto
+        {
+            Id = Guid.NewGuid(),
+            Title = "Active Session",
+            StartTime = DateTime.UtcNow,
+            IsCompleted = false
+        };
+        mediatorMock.Setup(m => m.Send(It.IsAny<GetActiveStudySessionQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expectedDto);
+
+        var controller = new StudySessionsController(mediatorMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await controller.GetActiveStudySession();
+
+        // Assert
+        var okResult = result.Should().BeOfType<OkObjectResult>().Subject;
+        okResult.Value.Should().BeEquivalentTo(expectedDto);
+    }
+
+    [Fact]
+    public async Task StudySessionsController_GetActive_WhenNoSession_ReturnsNoContentResult()
+    {
+        // Arrange
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<StudySessionsController>>();
+        mediatorMock.Setup(m => m.Send(It.IsAny<GetActiveStudySessionQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((StudySessionDto?)null);
+
+        var controller = new StudySessionsController(mediatorMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await controller.GetActiveStudySession();
+
+        // Assert
+        result.Should().BeOfType<NoContentResult>();
+    }
+
+    [Fact]
+    public async Task StudySessionsController_EndSession_WhenNotFound_ReturnsNotFoundResult()
+    {
+        // Arrange
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<StudySessionsController>>();
+        var sessionId = Guid.NewGuid();
+        mediatorMock.Setup(m => m.Send(It.IsAny<EndStudySessionCommand>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new StudySessionNotFoundException(sessionId));
+
+        var controller = new StudySessionsController(mediatorMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await controller.EndSession(sessionId);
+
+        // Assert
+        result.Should().BeOfType<NotFoundObjectResult>();
+    }
+
+    [Fact]
+    public async Task StudySessionsController_StartSession_WhenValidationFails_ReturnsBadRequestResult()
+    {
+        // Arrange
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<StudySessionsController>>();
+        mediatorMock.Setup(m => m.Send(It.IsAny<StartStudySessionCommand>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new FluentValidation.ValidationException(new[] { new ValidationFailure("Title", "Title is required.") }));
+
+        var controller = new StudySessionsController(mediatorMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await controller.StartSession(new StartStudySessionCommand { Title = "" });
+
+        // Assert
+        result.Should().BeOfType<BadRequestObjectResult>();
+    }
+
+    [Fact]
+    public async Task StudySessionsController_WhenUnexpectedExceptionOccurs_ReturnsStatusCode500()
+    {
+        // Arrange
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<StudySessionsController>>();
+        mediatorMock.Setup(m => m.Send(It.IsAny<GetStudySessionsQuery>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("Database connection failure"));
+
+        var controller = new StudySessionsController(mediatorMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await controller.GetStudySessions();
+
+        // Assert
+        var statusResult = result.Should().BeOfType<ObjectResult>().Subject;
+        statusResult.StatusCode.Should().Be(500);
+    }
 }
+

@@ -39,30 +39,60 @@ class _TimerScreenState extends State<TimerScreen> {
 
   Future<void> _loadSessions() async {
     try {
+      final activeSession = await _repository.getActiveSession();
       final sessions = await _repository.getStudySessions();
+
+      if (!mounted) return;
+
       setState(() {
         _sessions = sessions;
         _isLoading = false;
+
+        if (activeSession != null) {
+          _timer?.cancel();
+          _activeSession = activeSession;
+          _titleController.text = activeSession.title;
+          final elapsed = DateTime.now().toUtc().difference(activeSession.startTime.toUtc()).inSeconds;
+          _elapsedSeconds = elapsed > 0 ? elapsed : 0;
+          _isRunning = true;
+          _startTimer();
+        }
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load history: $e')));
-      }
+      final message = e.toString().replaceFirst('Exception: ', '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load sessions: $message')),
+      );
     }
   }
 
   Future<void> _startSession() async {
+    final title = _titleController.text.trim();
+    if (title.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a session title.')),
+      );
+      return;
+    }
+
     try {
-      final session = await _repository.startSession(_titleController.text.trim());
+      final session = await _repository.startSession(title);
+      if (!mounted) return;
       setState(() {
+        _timer?.cancel();
         _activeSession = session;
         _elapsedSeconds = 0;
         _isRunning = true;
       });
       _startTimer();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to start: $e')));
+      if (!mounted) return;
+      final message = e.toString().replaceFirst('Exception: ', '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
     }
   }
 
@@ -73,21 +103,28 @@ class _TimerScreenState extends State<TimerScreen> {
 
     try {
       await _repository.endSession(_activeSession!.id);
+      if (!mounted) return;
       setState(() {
         _activeSession = null;
         _elapsedSeconds = 0;
       });
       _loadSessions();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session completed & saved!')));
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Session completed & saved!')),
+      );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to end session: $e')));
+      if (!mounted) return;
+      final message = e.toString().replaceFirst('Exception: ', '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to end session: $message')),
+      );
     }
   }
 
   void _startTimer() {
+    _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
       setState(() {
         _elapsedSeconds++;
       });
@@ -153,7 +190,7 @@ class _TimerScreenState extends State<TimerScreen> {
         border: Border.all(color: const Color(0xFF6C5CE7), width: 8),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6C5CE7).withOpacity(0.2),
+            color: const Color(0xFF6C5CE7).withValues(alpha: 0.2),
             blurRadius: 30,
             spreadRadius: 5,
           )

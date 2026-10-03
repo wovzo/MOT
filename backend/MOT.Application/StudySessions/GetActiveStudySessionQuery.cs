@@ -1,49 +1,41 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using MOT.Application.Common.Exceptions;
 using MOT.Application.Common.Interfaces;
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace MOT.Application.StudySessions
 {
-    public class EndStudySessionCommand : IRequest<StudySessionDto>
+    public class GetActiveStudySessionQuery : IRequest<StudySessionDto?>
     {
-        public Guid SessionId { get; set; }
     }
 
-    public class EndStudySessionCommandHandler : IRequestHandler<EndStudySessionCommand, StudySessionDto>
+    public class GetActiveStudySessionQueryHandler : IRequestHandler<GetActiveStudySessionQuery, StudySessionDto?>
     {
         private readonly IAppDbContext _context;
         private readonly ICurrentUserService _currentUserService;
 
-        public EndStudySessionCommandHandler(IAppDbContext context, ICurrentUserService currentUserService)
+        public GetActiveStudySessionQueryHandler(IAppDbContext context, ICurrentUserService currentUserService)
         {
             _context = context;
             _currentUserService = currentUserService;
         }
 
-        public async Task<StudySessionDto> Handle(EndStudySessionCommand request, CancellationToken cancellationToken)
+        public async Task<StudySessionDto?> Handle(GetActiveStudySessionQuery request, CancellationToken cancellationToken)
         {
             var userIdStr = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
             if (!Guid.TryParse(userIdStr, out var userId))
                 throw new UnauthorizedAccessException();
-            
+
             var session = await _context.StudySessions
-                .FirstOrDefaultAsync(s => s.Id == request.SessionId && s.UserId == userId, cancellationToken);
-                
+                .Where(s => s.UserId == userId && !s.IsCompleted)
+                .OrderByDescending(s => s.StartTime)
+                .FirstOrDefaultAsync(cancellationToken);
+
             if (session == null)
-                throw new StudySessionNotFoundException(request.SessionId);
-                
-            if (!session.IsCompleted)
-            {
-                session.EndTime = DateTime.UtcNow;
-                session.DurationMinutes = (int)(session.EndTime.Value - session.StartTime).TotalMinutes;
-                session.IsCompleted = true;
-                
-                await _context.SaveChangesAsync(cancellationToken);
-            }
+                return null;
 
             return new StudySessionDto
             {
