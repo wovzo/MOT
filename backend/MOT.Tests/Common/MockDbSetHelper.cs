@@ -33,6 +33,7 @@ public static class MockDbSetHelper
             .Returns(() => sourceList.GetEnumerator());
 
         mockSet.Setup(d => d.Add(It.IsAny<T>())).Callback<T>(sourceList.Add);
+        mockSet.Setup(d => d.Remove(It.IsAny<T>())).Callback<T>(t => sourceList.Remove(t));
 
         return mockSet;
     }

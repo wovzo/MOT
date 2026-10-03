@@ -9,7 +9,6 @@ namespace MOT.Application.Habits.Commands
 {
     public class CreateHabitCommand : IRequest<Guid>
     {
-        public Guid UserId { get; set; }
         public string Title { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
     }
@@ -17,17 +16,23 @@ namespace MOT.Application.Habits.Commands
     public class CreateHabitCommandHandler : IRequestHandler<CreateHabitCommand, Guid>
     {
         private readonly IAppDbContext _context;
+        private readonly ICurrentUserService _currentUserService;
 
-        public CreateHabitCommandHandler(IAppDbContext context)
+        public CreateHabitCommandHandler(IAppDbContext context, ICurrentUserService currentUserService)
         {
             _context = context;
+            _currentUserService = currentUserService;
         }
 
         public async Task<Guid> Handle(CreateHabitCommand request, CancellationToken cancellationToken)
         {
+            var userIdStr = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+            if (!Guid.TryParse(userIdStr, out var userId))
+                throw new UnauthorizedAccessException();
+
             var habit = new Habit
             {
-                UserId = request.UserId,
+                UserId = userId,
                 Title = request.Title,
                 Description = request.Description,
                 CreatedAt = DateTime.UtcNow

@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using MOT.Application.Common.Exceptions;
 using MOT.Application.Common.Interfaces;
 using MOT.Domain.Entities;
 
@@ -11,27 +12,32 @@ namespace MOT.Application.Habits.Commands
 {
     public class ToggleHabitCompletionCommand : IRequest<bool>
     {
-        public Guid UserId { get; set; }
         public Guid HabitId { get; set; }
     }
 
     public class ToggleHabitCompletionCommandHandler : IRequestHandler<ToggleHabitCompletionCommand, bool>
     {
         private readonly IAppDbContext _context;
+        private readonly ICurrentUserService _currentUserService;
 
-        public ToggleHabitCompletionCommandHandler(IAppDbContext context)
+        public ToggleHabitCompletionCommandHandler(IAppDbContext context, ICurrentUserService currentUserService)
         {
             _context = context;
+            _currentUserService = currentUserService;
         }
 
         public async Task<bool> Handle(ToggleHabitCompletionCommand request, CancellationToken cancellationToken)
         {
+            var userIdStr = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+            if (!Guid.TryParse(userIdStr, out var userId))
+                throw new UnauthorizedAccessException();
+
             var habit = await _context.Habits
-                .FirstOrDefaultAsync(h => h.Id == request.HabitId && h.UserId == request.UserId, cancellationToken);
+                .FirstOrDefaultAsync(h => h.Id == request.HabitId && h.UserId == userId, cancellationToken);
 
             if (habit == null)
             {
-                throw new Exception("Habit not found or unauthorized.");
+                throw new HabitNotFoundException(request.HabitId);
             }
 
             var today = DateTime.UtcNow.Date;

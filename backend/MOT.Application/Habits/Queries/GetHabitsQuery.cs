@@ -12,22 +12,27 @@ namespace MOT.Application.Habits.Queries
 {
     public class GetHabitsQuery : IRequest<List<HabitDto>>
     {
-        public Guid UserId { get; set; }
     }
 
     public class GetHabitsQueryHandler : IRequestHandler<GetHabitsQuery, List<HabitDto>>
     {
         private readonly IAppDbContext _context;
+        private readonly ICurrentUserService _currentUserService;
 
-        public GetHabitsQueryHandler(IAppDbContext context)
+        public GetHabitsQueryHandler(IAppDbContext context, ICurrentUserService currentUserService)
         {
             _context = context;
+            _currentUserService = currentUserService;
         }
 
         public async Task<List<HabitDto>> Handle(GetHabitsQuery request, CancellationToken cancellationToken)
         {
+            var userIdStr = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+            if (!Guid.TryParse(userIdStr, out var userId))
+                throw new UnauthorizedAccessException();
+
             var habits = await _context.Habits
-                .Where(h => h.UserId == request.UserId)
+                .Where(h => h.UserId == userId)
                 .Include(h => h.Completions)
                 .OrderBy(h => h.CreatedAt)
                 .ToListAsync(cancellationToken);

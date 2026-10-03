@@ -121,6 +121,52 @@ Full-stack integration and API hardening for StudySessions was implemented acros
 - Backend tests: 43/43 passed (20 Auth, 8 StudySession handler/security, 15 P0.2 active query / validator / exception / controller tests).
 - Flutter test suite: 3/3 passed (including model serialization/deserialization for active and completed sessions).
 - Flutter analysis (`flutter analyze`): 20 issues total (0 errors, 1 warning, 19 infos/deprecations). These are pre-existing issues outside the P0.2 implementation files. P0.2 files introduced 0 analyzer issues.
+- Working tree: Committed in commit `3871523` (`Study Session Full Integration`).
+
+## P0.3 — Habits Full-Stack Integration & API Hardening
+
+**Status: VERIFIED / COMPLETE**
+
+Full-stack integration, validation, user ownership hardening, and automated testing for Habits were implemented across the ASP.NET Core backend and Flutter client.
+
+### Backend Changes
+
+- **User Identity & Security:**
+  - Removed client-tamperable `UserId` properties from `CreateHabitCommand`, `ToggleHabitCompletionCommand`, and `GetHabitsQuery`.
+  - All command and query handlers (`CreateHabitCommandHandler`, `ToggleHabitCompletionCommandHandler`, `GetHabitsQueryHandler`) now derive the authenticated `UserId` directly from `ICurrentUserService`.
+  - Enforced strict tenant isolation: users can only view, create, and toggle their own habits.
+- **Validation:** Added `CreateHabitCommandValidator` using FluentValidation (non-empty `Title`, maximum 100 characters). Automatically executed through MediatR `ValidationBehavior`.
+- **Domain Exception:** Added `HabitNotFoundException` thrown when attempting to toggle a habit that does not exist or does not belong to the authenticated user.
+- **Controller Error Semantics:**
+  - In `HabitsController`:
+    - `ValidationException` mapped to HTTP 400 Bad Request with `{ "error": "...", "errors": [...] }`.
+    - `HabitNotFoundException` mapped to HTTP 404 Not Found with `{ "error": "..." }`.
+    - Unexpected server exceptions logged via `ILogger<HabitsController>` and mapped to generic HTTP 500 Internal Server Error without leaking internal exception messages.
+  - Success responses preserved: `GET /api/habits` (200 with `List<HabitDto>`), `POST /api/habits` (200 with `{ Id = ... }`), `POST /api/habits/{id}/toggle` (200 with `{ IsCompletedToday = ... }`).
+- **Streak & Completion Behavior:** Preserved exact existing streak calculation and completion algorithm.
+
+### Frontend Changes
+
+- **API Path Correction:** Fixed leading slash bug in `HabitRepository` (`'habits'`, `'habits/$habitId/toggle'`), ensuring requests properly compose with `NetworkClient.baseUrl` (`https://mot-dalx.onrender.com/api/`).
+- **Defensive Error Handling:** Added safe error parsing in `HabitRepository` verifying `data is Map && data['error'] != null` before indexing into response data, preventing secondary `NoSuchMethodError` on non-JSON server/proxy responses.
+- **UI Preservation:** Habit dashboard UI and presentation logic preserved without unrelated modifications.
+
+### Verification
+
+- Backend build: 0 errors, 0 warnings (`dotnet build MOT.Api/MOT.Api.csproj`).
+- Backend tests: 69/69 passed (20 Auth, 23 StudySessions, 26 new Habit handler, validator, streak, and controller tests).
+- Flutter test suite: 6/6 passed (including 3 new Habit model deserialization tests in `habit_model_test.dart`).
+- Flutter analysis (`flutter analyze`): 20 issues total (0 errors, 1 warning, 19 infos/deprecations). All 20 are pre-existing diagnostics in other modules. P0.3 files introduced 0 analyzer issues.
 - Database & Migrations: Verified via `dotnet ef migrations has-pending-model-changes` — no model changes, no database schema modification or migration required.
 - Working tree: Uncommitted changes preserved for user review. No commits or pushes performed.
+
+### Deferred Work
+
+- Tasks full-stack hardening (validation, error semantics, tests).
+- User Profile screen integration and `/api/auth/me` endpoint.
+- Live Classroom backend integration.
+- Single-active-study-session database constraint.
+- Global Dio 401 interceptor.
+- Unrelated pre-existing analyzer diagnostics in other modules.
+
 

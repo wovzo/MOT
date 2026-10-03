@@ -1,10 +1,12 @@
 using System;
-using System.Security.Claims;
+using System.Linq;
 using System.Threading.Tasks;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using MOT.Application.Common.Exceptions;
 using MOT.Application.Habits.Commands;
 using MOT.Application.Habits.Queries;
 
@@ -17,20 +19,12 @@ namespace MOT.Api.Controllers
     public class HabitsController : ControllerBase
     {
         private readonly IMediator _mediator;
+        private readonly ILogger<HabitsController> _logger;
 
-        public HabitsController(IMediator mediator)
+        public HabitsController(IMediator mediator, ILogger<HabitsController> logger)
         {
             _mediator = mediator;
-        }
-
-        private Guid GetUserId()
-        {
-            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out var userId))
-            {
-                throw new UnauthorizedAccessException("Invalid user token.");
-            }
-            return userId;
+            _logger = logger;
         }
 
         [HttpGet]
@@ -38,34 +32,33 @@ namespace MOT.Api.Controllers
         {
             try
             {
-                var query = new GetHabitsQuery { UserId = GetUserId() };
-                var result = await _mediator.Send(query);
+                var result = await _mediator.Send(new GetHabitsQuery());
                 return Ok(result);
             }
             catch (Exception ex)
             {
-                return BadRequest(new { Error = ex.Message });
+                _logger.LogError(ex, "An unexpected error occurred while retrieving habits.");
+                return StatusCode(500, new { Error = "An unexpected error occurred while retrieving habits." });
             }
         }
 
         [HttpPost]
-        public async Task<IActionResult> CreateHabit([FromBody] CreateHabitRequest request)
+        public async Task<IActionResult> CreateHabit([FromBody] CreateHabitCommand command)
         {
             try
             {
-                var command = new CreateHabitCommand
-                {
-                    UserId = GetUserId(),
-                    Title = request.Title,
-                    Description = request.Description
-                };
-                
                 var habitId = await _mediator.Send(command);
                 return Ok(new { Id = habitId });
             }
+            catch (FluentValidation.ValidationException ex)
+            {
+                var errors = ex.Errors.Select(e => e.ErrorMessage).ToList();
+                return BadRequest(new { Error = errors.FirstOrDefault() ?? "Validation failed.", Errors = errors });
+            }
             catch (Exception ex)
             {
-                return BadRequest(new { Error = ex.Message });
+                _logger.LogError(ex, "An unexpected error occurred while creating habit.");
+                return StatusCode(500, new { Error = "An unexpected error occurred while creating habit." });
             }
         }
 
@@ -74,25 +67,23 @@ namespace MOT.Api.Controllers
         {
             try
             {
-                var command = new ToggleHabitCompletionCommand
-                {
-                    UserId = GetUserId(),
-                    HabitId = id
-                };
-                
-                var isCompletedNow = await _mediator.Send(command);
+                var isCompletedNow = await _mediator.Send(new ToggleHabitCompletionCommand { HabitId = id });
                 return Ok(new { IsCompletedToday = isCompletedNow });
+            }
+            catch (HabitNotFoundException ex)
+            {
+                return NotFound(new { Error = ex.Message });
+            }
+            catch (FluentValidation.ValidationException ex)
+            {
+                var errors = ex.Errors.Select(e => e.ErrorMessage).ToList();
+                return BadRequest(new { Error = errors.FirstOrDefault() ?? "Validation failed.", Errors = errors });
             }
             catch (Exception ex)
             {
-                return BadRequest(new { Error = ex.Message });
+                _logger.LogError(ex, "An unexpected error occurred while toggling habit {HabitId}.", id);
+                return StatusCode(500, new { Error = "An unexpected error occurred while toggling habit." });
             }
         }
-    }
-
-    public class CreateHabitRequest
-    {
-        public string Title { get; set; } = string.Empty;
-        public string Description { get; set; } = string.Empty;
     }
 }
