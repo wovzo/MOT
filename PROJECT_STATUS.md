@@ -169,4 +169,54 @@ Full-stack integration, validation, user ownership hardening, and automated test
 - Global Dio 401 interceptor.
 - Unrelated pre-existing analyzer diagnostics in other modules.
 
+## P0.4 — Daily Tasks Full-Stack Integration & API Hardening
+
+**Status: IMPLEMENTATION COMPLETE — AWAITING AUDIT**
+
+Full-stack integration, validation, user ownership hardening, and automated testing for Daily Tasks were implemented across the ASP.NET Core backend and Flutter client.
+
+### Backend Changes
+
+- **User Identity & Security:**
+  - Removed caller-supplied `UserId` properties from `CreateTaskCommand`, `ToggleTaskCommand`, and `GetTasksQuery`.
+  - All command and query handlers (`CreateTaskCommandHandler`, `ToggleTaskCommandHandler`, `GetTasksQueryHandler`) now resolve authenticated `UserId` directly through `ICurrentUserService`.
+  - Enforced strict tenant isolation: users can only view, create, and toggle their own tasks.
+- **Validation:** Added `CreateTaskCommandValidator` using FluentValidation (non-empty, non-whitespace `Title`, maximum 100 characters). Automatically executed through MediatR `ValidationBehavior`.
+- **Domain Exception:** Added `TaskNotFoundException` in `MOT.Application.Common.Exceptions`, thrown when attempting to toggle a task that does not exist or belongs to another user.
+- **Controller Error Semantics:**
+  - In `TasksController`:
+    - Bound `[FromBody] CreateTaskCommand command` directly, removing redundant `CreateTaskRequest`.
+    - `ValidationException` mapped to HTTP 400 Bad Request with `{ "error": "..." }`.
+    - `TaskNotFoundException` mapped to HTTP 404 Not Found with `{ "error": "..." }`.
+    - Unexpected server exceptions logged via `ILogger<TasksController>` and mapped to generic HTTP 500 Internal Server Error without leaking internal exception messages.
+  - Success responses preserved: `GET /api/tasks` (200 with `List<DailyTaskDto>`), `POST /api/tasks` (201 Created with `{ id = ... }`), `PATCH /api/tasks/{id}/toggle` (200 OK with `{ isCompleted = ... }`).
+
+### Frontend Changes
+
+- **Defensive Error Handling:** Hardened `TaskRepository` with safe error extraction verifying `data is Map && data['error'] != null` before indexing into response data, preventing secondary `NoSuchMethodError` on non-JSON server/proxy responses.
+- **Token Handling:** Removed redundant manual `SharedPreferences` JWT reads in `TaskRepository`, leveraging the `NetworkClient` authorization interceptor.
+- **Model Resilience:** Hardened `DailyTask.fromJson` with safe fallback defaults for `id`, `title`, `description`, `isCompleted`, and `createdAt` against missing or null values.
+- **UI Async Safety:** Safely guarded `ScaffoldMessenger` in `task_dashboard_screen.dart` across async gaps, reducing analyzer diagnostics from 20 to 18.
+
+### Verification
+
+- Backend build: 0 errors, 0 warnings (`dotnet build MOT.Api/MOT.Api.csproj`).
+- Backend tests: 101/101 passed (20 Auth, 23 StudySessions, 26 Habits, 32 new Task creation, validation, listing, toggle, and controller status code tests in `TaskHandlerTests.cs`).
+- Flutter test suite: 9/9 passed (3 StudySessions, 3 Habits, 3 new Task model deserialization and null-safety tests in `task_model_test.dart`).
+- Flutter analysis (`flutter analyze`): 18 issues found (0 errors, 1 pre-existing warning in `profile_screen.dart:4:8`, 17 pre-existing infos in `theme.dart`, `auth`, `classroom`, `habits`, `profile`, `custom_text_field`). 0 diagnostics in `features/tasks`.
+- Database & Migrations: Verified via `dotnet ef migrations has-pending-model-changes` — 0 pending model changes, 0 migrations created or applied.
+- Working tree: Clean baseline at `290deb8`, uncommitted changes preserved for user review. No commits or pushes performed.
+
+### Deferred Work
+
+- Task due dates, reminders, recurring tasks, and priorities.
+- Task edit/update and deletion endpoints/UI.
+- Task history/filtering.
+- User Profile screen integration and `/api/auth/me` endpoint.
+- Live Classroom backend integration.
+- Single-active-study-session database constraint.
+- Global Dio 401 interceptor.
+- Pre-existing Flutter analyzer diagnostics outside Tasks.
+
+
 

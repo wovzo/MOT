@@ -73,6 +73,7 @@ class _TaskDashboardScreenState extends State<TaskDashboardScreen> {
             ElevatedButton(
               onPressed: () async {
                 if (titleController.text.trim().isEmpty) return;
+                final messenger = ScaffoldMessenger.of(context);
                 Navigator.pop(context);
                 
                 try {
@@ -80,7 +81,7 @@ class _TaskDashboardScreenState extends State<TaskDashboardScreen> {
                   _loadTasks();
                 } catch (e) {
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    messenger.showSnackBar(
                       SnackBar(content: Text('Failed to create task: $e')),
                     );
                   }
@@ -119,13 +120,16 @@ class _TaskDashboardScreenState extends State<TaskDashboardScreen> {
                   leading: Checkbox(
                     value: task.isCompleted,
                     onChanged: (val) async {
+                      final messenger = ScaffoldMessenger.of(context);
                       try {
                         await _repository.toggleTask(task.id);
                         _loadTasks();
                       } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Failed to update task')),
-                        );
+                        if (mounted) {
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text('Failed to update task')),
+                          );
+                        }
                       }
                     },
                   ),

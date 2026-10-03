@@ -1,32 +1,48 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 using MediatR;
 using MOT.Application.Common.Interfaces;
 using MOT.Domain.Entities;
 
-namespace MOT.Application.Tasks.Commands;
-
-public record CreateTaskCommand(Guid UserId, string Title, string? Description) : IRequest<Guid>;
-
-public class CreateTaskCommandHandler : IRequestHandler<CreateTaskCommand, Guid>
+namespace MOT.Application.Tasks.Commands
 {
-    private readonly IAppDbContext _context;
-
-    public CreateTaskCommandHandler(IAppDbContext context)
+    public class CreateTaskCommand : IRequest<Guid>
     {
-        _context = context;
+        public string Title { get; set; } = string.Empty;
+        public string? Description { get; set; }
     }
 
-    public async Task<Guid> Handle(CreateTaskCommand request, CancellationToken cancellationToken)
+    public class CreateTaskCommandHandler : IRequestHandler<CreateTaskCommand, Guid>
     {
-        var task = new DailyTask
+        private readonly IAppDbContext _context;
+        private readonly ICurrentUserService _currentUserService;
+
+        public CreateTaskCommandHandler(IAppDbContext context, ICurrentUserService currentUserService)
         {
-            UserId = request.UserId,
-            Title = request.Title,
-            Description = request.Description
-        };
+            _context = context;
+            _currentUserService = currentUserService;
+        }
 
-        _context.Tasks.Add(task);
-        await _context.SaveChangesAsync(cancellationToken);
+        public async Task<Guid> Handle(CreateTaskCommand request, CancellationToken cancellationToken)
+        {
+            var userIdStr = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+            if (!Guid.TryParse(userIdStr, out var userId))
+                throw new UnauthorizedAccessException();
 
-        return task.Id;
+            var task = new DailyTask
+            {
+                UserId = userId,
+                Title = request.Title,
+                Description = request.Description,
+                CreatedAt = DateTime.UtcNow,
+                IsCompleted = false
+            };
+
+            _context.Tasks.Add(task);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            return task.Id;
+        }
     }
 }

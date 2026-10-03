@@ -1,7 +1,6 @@
 import 'package:dio/dio.dart';
 import '../../../../core/network_client.dart';
 import '../models/daily_task.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class TaskRepository {
   final NetworkClient _networkClient;
@@ -9,26 +8,16 @@ class TaskRepository {
   TaskRepository(this._networkClient);
 
   Future<List<DailyTask>> getTasks() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('jwt_token');
-
     try {
-      final response = await _networkClient.dio.get(
-        'tasks',
-        options: Options(headers: {'Authorization': 'Bearer $token'}),
-      );
-      
+      final response = await _networkClient.dio.get('tasks');
       final List<dynamic> data = response.data;
       return data.map((json) => DailyTask.fromJson(json)).toList();
     } on DioException catch (e) {
-      throw Exception(e.response?.data?['error'] ?? 'Failed to load tasks');
+      throw Exception(_extractErrorMessage(e, 'Failed to load tasks'));
     }
   }
 
   Future<void> createTask(String title, String? description) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('jwt_token');
-
     try {
       await _networkClient.dio.post(
         'tasks',
@@ -36,24 +25,30 @@ class TaskRepository {
           'title': title,
           'description': description,
         },
-        options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
     } on DioException catch (e) {
-      throw Exception(e.response?.data?['error'] ?? 'Failed to create task');
+      throw Exception(_extractErrorMessage(e, 'Failed to create task'));
     }
   }
 
-  Future<void> toggleTask(String id) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('jwt_token');
-
+  Future<bool> toggleTask(String id) async {
     try {
-      await _networkClient.dio.patch(
-        'tasks/$id/toggle',
-        options: Options(headers: {'Authorization': 'Bearer $token'}),
-      );
+      final response = await _networkClient.dio.patch('tasks/$id/toggle');
+      final data = response.data;
+      if (data is Map && data['isCompleted'] is bool) {
+        return data['isCompleted'] as bool;
+      }
+      return false;
     } on DioException catch (e) {
-      throw Exception(e.response?.data?['error'] ?? 'Failed to toggle task');
+      throw Exception(_extractErrorMessage(e, 'Failed to toggle task'));
     }
+  }
+
+  String _extractErrorMessage(DioException e, String defaultMessage) {
+    final data = e.response?.data;
+    if (data is Map && data['error'] != null && data['error'].toString().isNotEmpty) {
+      return data['error'].toString();
+    }
+    return defaultMessage;
   }
 }

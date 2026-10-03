@@ -1,31 +1,54 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using MOT.Application.Common.Exceptions;
 using MOT.Application.Common.Interfaces;
 
-namespace MOT.Application.Tasks.Commands;
-
-public record ToggleTaskCommand(Guid Id, Guid UserId) : IRequest<bool>;
-
-public class ToggleTaskCommandHandler : IRequestHandler<ToggleTaskCommand, bool>
+namespace MOT.Application.Tasks.Commands
 {
-    private readonly IAppDbContext _context;
-
-    public ToggleTaskCommandHandler(IAppDbContext context)
+    public class ToggleTaskCommand : IRequest<bool>
     {
-        _context = context;
+        public Guid Id { get; set; }
+
+        public ToggleTaskCommand() { }
+
+        public ToggleTaskCommand(Guid id)
+        {
+            Id = id;
+        }
     }
 
-    public async Task<bool> Handle(ToggleTaskCommand request, CancellationToken cancellationToken)
+    public class ToggleTaskCommandHandler : IRequestHandler<ToggleTaskCommand, bool>
     {
-        var task = await _context.Tasks
-            .FirstOrDefaultAsync(t => t.Id == request.Id && t.UserId == request.UserId, cancellationToken);
+        private readonly IAppDbContext _context;
+        private readonly ICurrentUserService _currentUserService;
 
-        if (task == null)
-            return false;
+        public ToggleTaskCommandHandler(IAppDbContext context, ICurrentUserService currentUserService)
+        {
+            _context = context;
+            _currentUserService = currentUserService;
+        }
 
-        task.IsCompleted = !task.IsCompleted;
-        await _context.SaveChangesAsync(cancellationToken);
+        public async Task<bool> Handle(ToggleTaskCommand request, CancellationToken cancellationToken)
+        {
+            var userIdStr = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+            if (!Guid.TryParse(userIdStr, out var userId))
+                throw new UnauthorizedAccessException();
 
-        return true;
+            var task = await _context.Tasks
+                .FirstOrDefaultAsync(t => t.Id == request.Id && t.UserId == userId, cancellationToken);
+
+            if (task == null)
+            {
+                throw new TaskNotFoundException(request.Id);
+            }
+
+            task.IsCompleted = !task.IsCompleted;
+            await _context.SaveChangesAsync(cancellationToken);
+
+            return task.IsCompleted;
+        }
     }
 }

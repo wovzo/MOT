@@ -1,65 +1,85 @@
-using System.Security.Claims;
+using System;
+using System.Linq;
+using System.Threading.Tasks;
+using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Cors;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using MOT.Application.Common.Exceptions;
 using MOT.Application.Tasks.Commands;
 using MOT.Application.Tasks.Queries;
 
-namespace MOT.Api.Controllers;
-
-[ApiController]
-[Route("api/[controller]")]
-[Authorize]
-[EnableCors("AllowAll")]
-public class TasksController : ControllerBase
+namespace MOT.Api.Controllers
 {
-    private readonly IMediator _mediator;
-
-    public TasksController(IMediator mediator)
+    [ApiController]
+    [Route("api/[controller]")]
+    [Authorize]
+    [EnableCors("AllowAll")]
+    public class TasksController : ControllerBase
     {
-        _mediator = mediator;
+        private readonly IMediator _mediator;
+        private readonly ILogger<TasksController> _logger;
+
+        public TasksController(IMediator mediator, ILogger<TasksController> logger)
+        {
+            _mediator = mediator;
+            _logger = logger;
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetTasks()
+        {
+            try
+            {
+                var tasks = await _mediator.Send(new GetTasksQuery());
+                return Ok(tasks);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error in GetTasks");
+                return StatusCode(StatusCodes.Status500InternalServerError, new { error = "An unexpected error occurred while retrieving tasks." });
+            }
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> CreateTask([FromBody] CreateTaskCommand command)
+        {
+            try
+            {
+                var taskId = await _mediator.Send(command);
+                return CreatedAtAction(nameof(GetTasks), new { id = taskId }, new { id = taskId });
+            }
+            catch (ValidationException ex)
+            {
+                return BadRequest(new { error = ex.Errors.First().ErrorMessage });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error in CreateTask");
+                return StatusCode(StatusCodes.Status500InternalServerError, new { error = "An unexpected error occurred while creating the task." });
+            }
+        }
+
+        [HttpPatch("{id}/toggle")]
+        public async Task<IActionResult> ToggleTask(Guid id)
+        {
+            try
+            {
+                var isCompleted = await _mediator.Send(new ToggleTaskCommand(id));
+                return Ok(new { isCompleted });
+            }
+            catch (TaskNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error in ToggleTask");
+                return StatusCode(StatusCodes.Status500InternalServerError, new { error = "An unexpected error occurred while toggling the task." });
+            }
+        }
     }
-
-    private Guid GetUserId()
-    {
-        var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (Guid.TryParse(userIdStr, out var userId))
-            return userId;
-        throw new UnauthorizedAccessException("Invalid token");
-    }
-
-    [HttpGet]
-    public async Task<IActionResult> GetTasks()
-    {
-        var query = new GetTasksQuery(GetUserId());
-        var tasks = await _mediator.Send(query);
-        return Ok(tasks);
-    }
-
-    [HttpPost]
-    public async Task<IActionResult> CreateTask([FromBody] CreateTaskRequest request)
-    {
-        var command = new CreateTaskCommand(GetUserId(), request.Title, request.Description);
-        var taskId = await _mediator.Send(command);
-        return CreatedAtAction(nameof(GetTasks), new { id = taskId }, new { id = taskId });
-    }
-
-    [HttpPatch("{id}/toggle")]
-    public async Task<IActionResult> ToggleTask(Guid id)
-    {
-        var command = new ToggleTaskCommand(id, GetUserId());
-        var success = await _mediator.Send(command);
-
-        if (!success)
-            return NotFound(new { error = "Task not found" });
-
-        return Ok(new { success = true });
-    }
-}
-
-public class CreateTaskRequest
-{
-    public string Title { get; set; } = string.Empty;
-    public string? Description { get; set; }
 }

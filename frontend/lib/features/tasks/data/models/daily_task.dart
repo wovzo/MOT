@@ -15,11 +15,13 @@ class DailyTask {
 
   factory DailyTask.fromJson(Map<String, dynamic> json) {
     return DailyTask(
-      id: json['id'],
-      title: json['title'],
-      description: json['description'],
-      isCompleted: json['isCompleted'],
-      createdAt: DateTime.parse(json['createdAt']),
+      id: (json['id'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      description: json['description'] as String?,
+      isCompleted: json['isCompleted'] is bool ? json['isCompleted'] as bool : false,
+      createdAt: json['createdAt'] != null
+          ? (DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now())
+          : DateTime.now(),
     );
   }
 }
