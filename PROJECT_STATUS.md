@@ -171,7 +171,7 @@ Full-stack integration, validation, user ownership hardening, and automated test
 
 ## P0.4 — Daily Tasks Full-Stack Integration & API Hardening
 
-**Status: IMPLEMENTATION COMPLETE — AWAITING AUDIT**
+**Status: VERIFIED / CLOSED**
 
 Full-stack integration, validation, user ownership hardening, and automated testing for Daily Tasks were implemented across the ASP.NET Core backend and Flutter client.
 
@@ -218,5 +218,64 @@ Full-stack integration, validation, user ownership hardening, and automated test
 - Global Dio 401 interceptor.
 - Pre-existing Flutter analyzer diagnostics outside Tasks.
 
+## P0.5 — User Profile & Auth Integration Full-Stack Hardening
 
+**Status: IMPLEMENTATION COMPLETE — READY FOR INDEPENDENT AUDIT**
 
+Full-stack integration, user identity resolution, error semantics, UI integration, and automated testing for the User Profile (`/api/auth/me`) were implemented across the ASP.NET Core backend and Flutter client.
+
+### Backend Changes
+
+- **Endpoint:** Added `[HttpGet("me")]` endpoint to `AuthController` with `[Authorize]` attribute.
+- **Query & Handler:**
+  - Added `GetCurrentUserQuery : IRequest<UserProfileDto>`.
+  - Added `GetCurrentUserQueryHandler` in `MOT.Application.Users.Queries`.
+  - User identity is resolved strictly from `ICurrentUserService.UserId`. Client-supplied user IDs are not accepted or processed.
+- **DTO & Exceptions:**
+  - Added `UserProfileDto` containing `Id`, `Email`, `DisplayName`, `CreatedAt`, `CurrentStreak`, `Level`, and `XP`.
+  - Added `UserNotFoundException` in `MOT.Application.Common.Exceptions`.
+- **Controller Error Semantics:**
+  - HTTP 200 OK returning `UserProfileDto` upon successful profile resolution.
+  - HTTP 401 Unauthorized enforced by ASP.NET Core authentication middleware when JWT token is missing, expired, or invalid.
+  - HTTP 404 Not Found returning `{ "error": "User not found" }` when authenticated user record does not exist in database (`UserNotFoundException`).
+  - HTTP 500 Internal Server Error returning `{ "error": "An error occurred while fetching user profile" }` upon unexpected errors, with full exception logged via `ILogger<AuthController>`.
+- **Database & Persistence:**
+  - Leveraged existing `IAuthRepository.GetUserByIdAsync` and existing `Users` table schema (`Id`, `Email`, `DisplayName`, `CreatedAt`, `XP`, `Level`, `CurrentStreak`).
+  - No database migration or schema modification required (0 pending model changes).
+
+### Frontend Changes
+
+- **Data Model:** Added `UserProfile` model in `lib/features/profile/data/models/user_profile.dart` with defensive `fromJson` parser providing safe fallback defaults for `id`, `email`, `displayName`, `createdAt`, `currentStreak`, `level`, and `xp`.
+- **Repository:**
+  - Added `getProfile()` to `AuthRepository` in `lib/features/auth/data/auth_repository.dart` calling `auth/me` with `NetworkClient`.
+  - Implemented defensive error extraction checking `data is Map && data['error'] != null` to prevent `NoSuchMethodError` on non-JSON server/gateway responses.
+- **Riverpod State Management:**
+  - Added `userProfileProvider = FutureProvider<UserProfile>` in `lib/features/auth/presentation/providers/auth_provider.dart`.
+- **Profile UI Integration:**
+  - Updated `ProfileScreen` in `lib/features/profile/presentation/screens/profile_screen.dart` to consume `userProfileProvider`.
+  - Displays authenticated user's real `displayName`, `email`, `currentStreak`, `level`, and `xp`.
+  - Implemented loading state with `CircularProgressIndicator` and error state with retry button.
+  - Preserved static `'--'` with unit `'Hours'` for `Total Focus` (documented as deferred work).
+  - Cleaned up unused import (`auth_repository.dart`) and added `const` constructor optimizations.
+- **Navigation Integration:**
+  - Added Profile tab as 5th item in `HomeScreen` bottom navigation bar (`lib/core/presentation/screens/home_screen.dart`).
+
+### Verification
+
+- Backend build: 0 errors, 0 warnings (`dotnet build MOT.Api/MOT.Api.csproj`).
+- Backend tests: 112/112 passed (20 Auth, 23 StudySessions, 26 Habits, 32 Tasks, 11 new User Profile tests in `UserProfileHandlerTests.cs`).
+- Flutter test suite: 12/12 passed (3 StudySessions, 3 Habits, 3 Tasks, 3 new User Profile deserialization tests in `user_profile_model_test.dart`).
+- Flutter analysis (`flutter analyze`): 11 issues found (0 errors, 0 warnings, 11 pre-existing infos). Unused import warning in `profile_screen.dart` resolved. 0 analyzer issues in P0.5 code.
+- Database & Migrations: Verified via `dotnet ef migrations has-pending-model-changes` — 0 pending model changes, 0 migrations created or applied.
+- Working tree: Clean baseline at `ef7bb63`, uncommitted changes preserved for user review. No commits or pushes performed.
+
+### Deferred Work
+
+- Total Focus hours calculation / aggregation endpoint.
+- User profile editing / DisplayName updating.
+- Avatar upload / storage.
+- Password change / account settings.
+- Live Classroom backend integration.
+- Single-active-study-session database constraint.
+- Global Dio 401 interceptor.
+- Pre-existing Flutter analyzer infos in other modules.

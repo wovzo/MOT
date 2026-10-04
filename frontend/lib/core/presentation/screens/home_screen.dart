@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import '../../../features/tasks/presentation/screens/task_dashboard_screen.dart';
 import '../../../features/habits/presentation/screens/habit_dashboard_screen.dart';
 import '../../../features/timer/presentation/screens/timer_screen.dart';
-
 import '../../../features/classroom/presentation/screens/classroom_join_screen.dart';
+import '../../../features/profile/presentation/screens/profile_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,6 +20,7 @@ class _HomeScreenState extends State<HomeScreen> {
     const HabitDashboardScreen(),
     const TimerScreen(),
     const ClassroomJoinScreen(),
+    const ProfileScreen(),
   ];
 
   @override
@@ -49,6 +50,10 @@ class _HomeScreenState extends State<HomeScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.video_camera_front),
             label: 'Live',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline),
+            label: 'Profile',
           ),
         ],
       ),

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme.dart';
-import '../../../auth/data/auth_repository.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../auth/presentation/screens/login_screen.dart';
+import '../../data/models/user_profile.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -22,6 +22,8 @@ class ProfileScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final profileAsync = ref.watch(userProfileProvider);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Profile'),
@@ -36,66 +38,118 @@ class ProfileScreen extends ConsumerWidget {
           )
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          children: [
-            const CircleAvatar(
-              radius: 50,
-              backgroundColor: AppTheme.focusPurple,
-              child: Icon(Icons.person_rounded, size: 50, color: Colors.white),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'User Name', // TODO: Fetch from state
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'user@example.com', // TODO: Fetch from state
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white54),
-            ),
-            const SizedBox(height: 32),
-            _buildStatCards(),
-            const SizedBox(height: 40),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => _logout(context, ref),
-                icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
-                label: const Text('Log Out', style: TextStyle(color: Colors.redAccent)),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  side: const BorderSide(color: Colors.redAccent),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+      body: profileAsync.when(
+        loading: () => const Center(
+          child: CircularProgressIndicator(color: AppTheme.focusPurple),
+        ),
+        error: (error, stack) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline_rounded, size: 48, color: Colors.redAccent),
+                const SizedBox(height: 16),
+                Text(
+                  'Failed to load profile',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  error.toString(),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white54, fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () => ref.refresh(userProfileProvider),
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Retry'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.focusPurple,
                   ),
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
+        ),
+        data: (profile) => RefreshIndicator(
+          onRefresh: () => ref.refresh(userProfileProvider.future),
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              children: [
+                const CircleAvatar(
+                  radius: 50,
+                  backgroundColor: AppTheme.focusPurple,
+                  child: Icon(Icons.person_rounded, size: 50, color: Colors.white),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  profile.displayName.isNotEmpty ? profile.displayName : 'User',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  profile.email,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white54),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.focusPurple.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'Level ${profile.level} • ${profile.xp} XP',
+                    style: const TextStyle(color: AppTheme.focusPurple, fontWeight: FontWeight.w600, fontSize: 13),
+                  ),
+                ),
+                const SizedBox(height: 32),
+                _buildStatCards(profile),
+                const SizedBox(height: 40),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _logout(context, ref),
+                    icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
+                    label: const Text('Log Out', style: TextStyle(color: Colors.redAccent)),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      side: const BorderSide(color: Colors.redAccent),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildStatCards() {
+  Widget _buildStatCards(UserProfile profile) {
     return Row(
       children: [
         Expanded(
           child: _StatCard(
             title: 'Current Streak',
-            value: '5',
+            value: '${profile.currentStreak}',
             unit: 'Days',
             icon: Icons.local_fire_department_rounded,
             color: AppTheme.streakAmber,
           ),
         ),
         const SizedBox(width: 16),
-        Expanded(
+        const Expanded(
           child: _StatCard(
             title: 'Total Focus',
-            value: '12',
+            value: '--',
             unit: 'Hours',
             icon: Icons.timer_rounded,
             color: AppTheme.growthTeal,
