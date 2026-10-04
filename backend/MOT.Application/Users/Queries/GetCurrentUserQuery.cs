@@ -1,7 +1,9 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
 using MOT.Application.Common.Exceptions;
 using MOT.Application.Common.Interfaces;
 using MOT.Application.DTOs;
@@ -17,11 +19,16 @@ namespace MOT.Application.Users.Queries
     {
         private readonly IAuthRepository _authRepository;
         private readonly ICurrentUserService _currentUserService;
+        private readonly IAppDbContext _context;
 
-        public GetCurrentUserQueryHandler(IAuthRepository authRepository, ICurrentUserService currentUserService)
+        public GetCurrentUserQueryHandler(
+            IAuthRepository authRepository,
+            ICurrentUserService currentUserService,
+            IAppDbContext context)
         {
             _authRepository = authRepository;
             _currentUserService = currentUserService;
+            _context = context;
         }
 
         public async Task<UserProfileDto> Handle(GetCurrentUserQuery request, CancellationToken cancellationToken)
@@ -36,6 +43,10 @@ namespace MOT.Application.Users.Queries
                 throw new UserNotFoundException(userId);
             }
 
+            var totalFocusMinutes = await _context.StudySessions
+                .Where(s => s.UserId == userId && s.EndTime != null)
+                .SumAsync(s => s.DurationMinutes, cancellationToken);
+
             return new UserProfileDto(
                 user.Id,
                 user.Email,
@@ -43,7 +54,8 @@ namespace MOT.Application.Users.Queries
                 user.CreatedAt,
                 user.CurrentStreak,
                 user.Level,
-                user.XP
+                user.XP,
+                totalFocusMinutes
             );
         }
     }

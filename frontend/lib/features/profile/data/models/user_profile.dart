@@ -6,6 +6,7 @@ class UserProfile {
   final int currentStreak;
   final int level;
   final int xp;
+  final int totalFocusMinutes;
 
   UserProfile({
     required this.id,
@@ -15,6 +16,7 @@ class UserProfile {
     required this.currentStreak,
     required this.level,
     required this.xp,
+    required this.totalFocusMinutes,
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -37,6 +39,13 @@ class UserProfile {
           : 0,
       level: json['level'] is num ? (json['level'] as num).toInt() : 1,
       xp: json['xp'] is num ? (json['xp'] as num).toInt() : 0,
+      totalFocusMinutes: json['totalFocusMinutes'] is num
+          ? (json['totalFocusMinutes'] as num).toInt()
+          : json['TotalFocusMinutes'] is num
+              ? (json['TotalFocusMinutes'] as num).toInt()
+              : (int.tryParse(json['totalFocusMinutes']?.toString() ?? '') ??
+                  int.tryParse(json['TotalFocusMinutes']?.toString() ?? '') ??
+                  0),
     );
   }
 }

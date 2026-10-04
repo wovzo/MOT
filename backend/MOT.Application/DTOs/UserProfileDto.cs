@@ -9,6 +9,7 @@ namespace MOT.Application.DTOs
         DateTime CreatedAt,
         int CurrentStreak,
         int Level,
-        int XP
+        int XP,
+        int TotalFocusMinutes
     );
 }

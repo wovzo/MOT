@@ -220,7 +220,7 @@ Full-stack integration, validation, user ownership hardening, and automated test
 
 ## P0.5 — User Profile & Auth Integration Full-Stack Hardening
 
-**Status: IMPLEMENTATION COMPLETE — READY FOR INDEPENDENT AUDIT**
+**Status: VERIFIED / CLOSED**
 
 Full-stack integration, user identity resolution, error semantics, UI integration, and automated testing for the User Profile (`/api/auth/me`) were implemented across the ASP.NET Core backend and Flutter client.
 
@@ -279,3 +279,52 @@ Full-stack integration, user identity resolution, error semantics, UI integratio
 - Single-active-study-session database constraint.
 - Global Dio 401 interceptor.
 - Pre-existing Flutter analyzer infos in other modules.
+
+## P0.6 — Total Focus Hours & Study Session Aggregation Full-Stack Hardening
+
+**Status: IMPLEMENTATION COMPLETE — READY FOR INDEPENDENT AUDIT**
+
+Full-stack aggregation of completed study session focus time was implemented across the ASP.NET Core backend and Flutter client, connecting `StudySessions` persistence to `ProfileScreen`.
+
+### Backend Changes
+
+- **DTO Extension:** Added `int TotalFocusMinutes` to `UserProfileDto` in `MOT.Application.DTOs`.
+- **Query Handler Aggregation:**
+  - Injected `IAppDbContext` into `GetCurrentUserQueryHandler` (`MOT.Application.Users.Queries`).
+  - Added LINQ aggregation summing `DurationMinutes` for completed study sessions belonging exclusively to the authenticated user:
+    `_context.StudySessions.Where(s => s.UserId == userId && s.EndTime != null).SumAsync(s => s.DurationMinutes, cancellationToken)`
+  - Safe empty handling: returns `0` minutes when the user has no completed study sessions.
+  - Active sessions (`EndTime == null`) and other users' sessions are strictly excluded.
+  - Identity is derived strictly from `ICurrentUserService.UserId`.
+- **API Response:** Preserved existing `GET /api/auth/me` route with `TotalFocusMinutes` included in the response payload.
+
+### Frontend Changes
+
+- **Data Model:** Extended `UserProfile` (`lib/features/profile/data/models/user_profile.dart`) with `int totalFocusMinutes`. Hardened `fromJson` to safely parse numbers, numeric strings, null, or missing fields with safe default of `0`.
+- **Profile Screen Integration:**
+  - Updated `ProfileScreen` (`lib/features/profile/presentation/screens/profile_screen.dart`) to derive and format focus hours using `_formatFocusHours(int totalMinutes)`.
+  - Format rule: displays integer hours when minutes divide evenly into 60 (e.g., `0`, `1`, `2`, `12`), and one decimal place when needed (e.g., `1.5`, `2.5`).
+  - Replaced the static `'--'` placeholder with the real calculated focus hours.
+  - Retained the `'Hours'` unit label.
+
+### Verification
+
+- Backend build: 0 errors, 0 warnings (`dotnet build MOT.Api/MOT.Api.csproj`).
+- Backend tests: 116/116 passed (+4 new tests in `UserProfileHandlerTests.cs` verifying zero sessions, multiple completed sessions, active session exclusion, other users' session exclusion, and controller payload assertions).
+- Flutter test suite: 14/14 passed (+2 new tests in `user_profile_model_test.dart` verifying null fallback, missing fallback, numeric string, and non-numeric safety).
+- Flutter analysis (`flutter analyze --no-pub`): 11 issues found (0 errors, 0 warnings, 11 pre-existing infos). 0 analyzer diagnostics in P0.6 code.
+- Database & Migrations: Verified via `dotnet ef migrations has-pending-model-changes` — 0 pending model changes, 0 migrations created or applied.
+- Working tree: Clean baseline at `3f52331`, uncommitted changes preserved for user review. No commits or pushes performed.
+
+### Deferred Work
+
+- Weekly / monthly focus analytics graphs.
+- Task deletion & editing.
+- Habit deletion & editing.
+- Single-active-study-session concurrency enforcement.
+- First-run onboarding routing.
+- Live Classroom backend integration.
+- Avatar upload & profile editing.
+- Global Dio 401 interceptor.
+- Pre-existing Flutter analyzer infos in other modules.
+

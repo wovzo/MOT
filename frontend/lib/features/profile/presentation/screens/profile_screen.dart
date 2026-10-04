@@ -133,6 +133,15 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
+  String _formatFocusHours(int totalMinutes) {
+    if (totalMinutes <= 0) return '0';
+    if (totalMinutes % 60 == 0) {
+      return (totalMinutes ~/ 60).toString();
+    }
+    final hours = totalMinutes / 60.0;
+    return hours.toStringAsFixed(1);
+  }
+
   Widget _buildStatCards(UserProfile profile) {
     return Row(
       children: [
@@ -146,10 +155,10 @@ class ProfileScreen extends ConsumerWidget {
           ),
         ),
         const SizedBox(width: 16),
-        const Expanded(
+        Expanded(
           child: _StatCard(
             title: 'Total Focus',
-            value: '--',
+            value: _formatFocusHours(profile.totalFocusMinutes),
             unit: 'Hours',
             icon: Icons.timer_rounded,
             color: AppTheme.growthTeal,
