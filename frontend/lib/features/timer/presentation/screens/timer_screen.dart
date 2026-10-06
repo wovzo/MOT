@@ -190,7 +190,7 @@ class _TimerScreenState extends State<TimerScreen> {
         border: Border.all(color: const Color(0xFF6C5CE7), width: 8),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6C5CE7).withValues(alpha: 0.2),
+            color: const Color(0xFF6C5CE7).withOpacity(0.2),
             blurRadius: 30,
             spreadRadius: 5,
           )
