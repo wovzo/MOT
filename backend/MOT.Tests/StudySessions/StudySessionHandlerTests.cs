@@ -491,5 +491,213 @@ public class StudySessionHandlerTests
         var statusResult = result.Should().BeOfType<ObjectResult>().Subject;
         statusResult.StatusCode.Should().Be(500);
     }
+
+    // ==========================================
+    // P0.7 - Single Active Session Concurrency Tests
+    // ==========================================
+
+    [Fact]
+    public async Task StartStudySession_WhenActiveSessionAlreadyExists_ThrowsActiveStudySessionAlreadyExistsException()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var existingActiveSession = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Existing Active Session",
+            StartTime = DateTime.UtcNow.AddMinutes(-15),
+            IsCompleted = false,
+            EndTime = null
+        };
+        _sessions.Add(existingActiveSession);
+
+        var handler = new StartStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var command = new StartStudySessionCommand { Title = "Second Session Attempt" };
+
+        // Act
+        Func<Task> act = async () => await handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<ActiveStudySessionAlreadyExistsException>()
+            .WithMessage("You already have an active study session.");
+
+        _sessions.Should().HaveCount(1);
+        _dbContextMock.Verify(c => c.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task StartStudySession_WhenCompletedSessionsExist_AllowsStartingNewSession()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var completedSession1 = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Yesterday Session",
+            StartTime = DateTime.UtcNow.AddDays(-1),
+            EndTime = DateTime.UtcNow.AddDays(-1).AddHours(1),
+            DurationMinutes = 60,
+            IsCompleted = true
+        };
+        var completedSession2 = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Morning Session",
+            StartTime = DateTime.UtcNow.AddHours(-3),
+            EndTime = DateTime.UtcNow.AddHours(-2),
+            DurationMinutes = 60,
+            IsCompleted = true
+        };
+        _sessions.AddRange(new[] { completedSession1, completedSession2 });
+
+        var handler = new StartStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var command = new StartStudySessionCommand { Title = "New Active Session" };
+
+        // Act
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Title.Should().Be("New Active Session");
+        result.IsCompleted.Should().BeFalse();
+        _sessions.Should().HaveCount(3);
+        _sessions.Count(s => !s.IsCompleted).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task StartStudySession_WhenDifferentUserHasActiveSession_AllowsStartingSessionForCurrentUser()
+    {
+        // Arrange
+        var userA = Guid.NewGuid();
+        var userB = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userA.ToString());
+
+        var userBActiveSession = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userB,
+            Title = "User B Active",
+            StartTime = DateTime.UtcNow.AddMinutes(-10),
+            IsCompleted = false,
+            EndTime = null
+        };
+        _sessions.Add(userBActiveSession);
+
+        var handler = new StartStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var command = new StartStudySessionCommand { Title = "User A Active" };
+
+        // Act
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Title.Should().Be("User A Active");
+        _sessions.Should().HaveCount(2);
+        _sessions.Count(s => !s.IsCompleted).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task StartStudySession_EndSessionThenStart_AllowsStartingNewSession()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var activeSession = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Initial Active Session",
+            StartTime = DateTime.UtcNow.AddMinutes(-40),
+            IsCompleted = false,
+            EndTime = null
+        };
+        _sessions.Add(activeSession);
+
+        var endHandler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        await endHandler.Handle(new EndStudySessionCommand { SessionId = activeSession.Id }, CancellationToken.None);
+
+        var startHandler = new StartStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var command = new StartStudySessionCommand { Title = "Next Active Session" };
+
+        // Act
+        var result = await startHandler.Handle(command, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Title.Should().Be("Next Active Session");
+        _sessions.Count(s => !s.IsCompleted).Should().Be(1);
+        _sessions.Count(s => s.IsCompleted).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task StudySessionsController_StartSession_WhenActiveSessionAlreadyExists_ReturnsConflict409()
+    {
+        // Arrange
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<StudySessionsController>>();
+        mediatorMock.Setup(m => m.Send(It.IsAny<StartStudySessionCommand>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ActiveStudySessionAlreadyExistsException());
+
+        var controller = new StudySessionsController(mediatorMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await controller.StartSession(new StartStudySessionCommand { Title = "Duplicate Active" });
+
+        // Assert
+        var conflictResult = result.Should().BeOfType<ConflictObjectResult>().Subject;
+        conflictResult.StatusCode.Should().Be(409);
+    }
+
+    [Fact]
+    public async Task StudySessionsController_StartSession_WhenDbUpdateExceptionIsActiveUserIdViolation_ReturnsConflict409()
+    {
+        // Arrange
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<StudySessionsController>>();
+        var innerException = new Exception("Duplicate entry 'guid-123' for key 'IX_StudySessions_ActiveUserId' (Error 1062)");
+        var dbUpdateException = new DbUpdateException("An error occurred while saving the entity changes.", innerException);
+
+        mediatorMock.Setup(m => m.Send(It.IsAny<StartStudySessionCommand>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(dbUpdateException);
+
+        var controller = new StudySessionsController(mediatorMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await controller.StartSession(new StartStudySessionCommand { Title = "Concurrent Duplicate Active" });
+
+        // Assert
+        var conflictResult = result.Should().BeOfType<ConflictObjectResult>().Subject;
+        conflictResult.StatusCode.Should().Be(409);
+    }
+
+    [Fact]
+    public async Task StudySessionsController_StartSession_WhenDbUpdateExceptionIsUnrelated_ReturnsStatusCode500()
+    {
+        // Arrange
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<StudySessionsController>>();
+        var dbUpdateException = new DbUpdateException("Unrelated database constraint violation.", new Exception("Foreign key failure"));
+
+        mediatorMock.Setup(m => m.Send(It.IsAny<StartStudySessionCommand>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(dbUpdateException);
+
+        var controller = new StudySessionsController(mediatorMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await controller.StartSession(new StartStudySessionCommand { Title = "Failed Session" });
+
+        // Assert
+        var statusResult = result.Should().BeOfType<ObjectResult>().Subject;
+        statusResult.StatusCode.Should().Be(500);
+    }
 }
+
 

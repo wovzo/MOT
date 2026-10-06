@@ -42,6 +42,11 @@ public class AppDbContext : DbContext, IAppDbContext
                   .OnDelete(DeleteBehavior.Cascade)
                   .IsRequired();
             entity.HasIndex(e => e.UserId);
+
+            entity.Property<Guid?>("ActiveUserId")
+                  .HasComputedColumnSql("CASE WHEN `IsCompleted` = 0 AND `EndTime` IS NULL THEN `UserId` ELSE NULL END", stored: true);
+            entity.HasIndex("ActiveUserId")
+                  .IsUnique();
         });
     }
 }

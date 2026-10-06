@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using MOT.Application.Common.Exceptions;
 using MOT.Application.StudySessions;
@@ -68,6 +69,14 @@ namespace MOT.Api.Controllers
                 var session = await _mediator.Send(command);
                 return Ok(session);
             }
+            catch (ActiveStudySessionAlreadyExistsException ex)
+            {
+                return Conflict(new { Error = ex.Message });
+            }
+            catch (DbUpdateException ex) when (IsActiveSessionUniqueConstraintViolation(ex))
+            {
+                return Conflict(new { Error = "You already have an active study session." });
+            }
             catch (FluentValidation.ValidationException ex)
             {
                 var errors = ex.Errors.Select(e => e.ErrorMessage).ToList();
@@ -78,6 +87,14 @@ namespace MOT.Api.Controllers
                 _logger.LogError(ex, "An unexpected error occurred while starting study session.");
                 return StatusCode(500, new { Error = "An unexpected error occurred while starting study session." });
             }
+        }
+
+        private static bool IsActiveSessionUniqueConstraintViolation(DbUpdateException ex)
+        {
+            var message = ex.InnerException?.Message ?? ex.Message;
+            return message.Contains("ActiveUserId", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("IX_StudySessions_ActiveUserId", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("1062");
         }
 
         [HttpPost("{id}/end")]

@@ -321,10 +321,57 @@ Full-stack aggregation of completed study session focus time was implemented acr
 - Weekly / monthly focus analytics graphs.
 - Task deletion & editing.
 - Habit deletion & editing.
-- Single-active-study-session concurrency enforcement.
 - First-run onboarding routing.
 - Live Classroom backend integration.
 - Avatar upload & profile editing.
 - Global Dio 401 interceptor.
 - Pre-existing Flutter analyzer infos in other modules.
+
+## P0.7 — Single Active StudySession Concurrency Hardening
+
+**Status: IMPLEMENTATION COMPLETE — READY FOR INDEPENDENT AUDIT**
+
+Full-stack concurrency hardening for single active study session per authenticated user was implemented across the ASP.NET Core backend and database mapping.
+
+### Backend Changes
+
+- **Application-Level Guard:**
+  - Added `ActiveStudySessionAlreadyExistsException` in `MOT.Application.Common.Exceptions`.
+  - Updated `StartStudySessionCommandHandler` to verify if the authenticated user (`ICurrentUserService.UserId`) already has an active study session (`!IsCompleted && EndTime == null`). Throws `ActiveStudySessionAlreadyExistsException` if active session exists.
+- **Database Race-Safe Enforcement:**
+  - Updated `StudySession` EF Core entity configuration in `AppDbContext.OnModelCreating`.
+  - Added stored virtual/computed column `ActiveUserId` defined as:
+    `CASE WHEN ``IsCompleted`` = 0 AND ``EndTime`` IS NULL THEN ``UserId`` ELSE NULL END`
+  - Added `UNIQUE` index `IX_StudySessions_ActiveUserId` on `ActiveUserId`.
+  - Guarantees at most ONE active study session per user at database level, preventing TOCTOU race conditions.
+  - Generated EF Core Migration `20261006064106_AddSingleActiveStudySessionConstraint`.
+- **Controller Error Contract:**
+  - Updated `StudySessionsController.StartSession` to catch `ActiveStudySessionAlreadyExistsException` and return `HTTP 409 Conflict` with `{ "error": "You already have an active study session." }`.
+  - Added `DbUpdateException` handler catching database unique constraint violations (`ActiveUserId` / `1062`) returning `HTTP 409 Conflict` with `{ "error": "You already have an active study session." }`.
+  - Unrelated database errors fall through to existing generic `500 Internal Server Error` logging.
+
+### Frontend Impact
+
+- **Zero Client Changes Required:** Verified that existing Flutter client (`StudySessionRepository` & `TimerScreen`) handles HTTP 409 Conflict responses and displays server error messages cleanly via `SnackBar`. Active sessions are recovered via `GET /api/studysessions/active` on screen load.
+
+### Verification
+
+- Backend build: 0 errors, 0 warnings (`dotnet build MOT.Api/MOT.Api.csproj`).
+- Backend tests: 123/123 passed (+7 new tests in `StudySessionHandlerTests.cs` verifying single active session enforcement, multiple completed sessions, multi-user isolation, completion-restart cycles, and controller HTTP 409 Conflict responses).
+- Flutter test suite: 14/14 passed (`flutter test`).
+- Flutter analysis (`flutter analyze --no-pub`): 11 issues found (0 errors, 0 warnings, 11 pre-existing infos). 0 analyzer diagnostics in P0.7 code.
+- Database & Migrations: Verified via `dotnet ef migrations has-pending-model-changes` — 0 pending model changes. Single new migration `20261006064106_AddSingleActiveStudySessionConstraint` generated.
+- Working tree: Uncommitted changes preserved for user review. No commits or pushes performed.
+
+### Deferred Work
+
+- Weekly / monthly focus analytics graphs.
+- Task deletion & editing.
+- Habit deletion & editing.
+- First-run onboarding routing.
+- Live Classroom backend integration.
+- Avatar upload & profile editing.
+- Global Dio 401 interceptor.
+- Pre-existing Flutter analyzer infos in other modules.
+
 

@@ -1,4 +1,6 @@
 using MediatR;
+using Microsoft.EntityFrameworkCore;
+using MOT.Application.Common.Exceptions;
 using MOT.Application.Common.Interfaces;
 using MOT.Domain.Entities;
 using System;
@@ -28,6 +30,14 @@ namespace MOT.Application.StudySessions
             var userIdStr = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
             if (!Guid.TryParse(userIdStr, out var userId))
                 throw new UnauthorizedAccessException();
+
+            var hasActiveSession = await _context.StudySessions
+                .AnyAsync(s => s.UserId == userId && !s.IsCompleted && s.EndTime == null, cancellationToken);
+
+            if (hasActiveSession)
+            {
+                throw new ActiveStudySessionAlreadyExistsException();
+            }
 
             var session = new StudySession
             {
