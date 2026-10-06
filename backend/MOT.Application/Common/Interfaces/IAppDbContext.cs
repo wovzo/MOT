@@ -10,6 +10,7 @@ public interface IAppDbContext
     DbSet<Habit> Habits { get; }
     DbSet<HabitCompletion> HabitCompletions { get; }
     DbSet<StudySession> StudySessions { get; }
+    DbSet<RoomParticipant> RoomParticipants { get; }
     
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
 }
