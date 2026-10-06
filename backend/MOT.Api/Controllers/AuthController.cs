@@ -93,5 +93,24 @@ namespace MOT.Api.Controllers
                 return StatusCode(500, new { error = "An unexpected error occurred while retrieving user profile." });
             }
         }
+
+        [HttpPost("reset-password")]
+        public async Task<IActionResult> ResetPassword([FromBody] MOT.Application.Users.Commands.ResetPasswordCommand command)
+        {
+            try
+            {
+                var success = await _mediator.Send(command);
+                if (!success)
+                {
+                    return NotFound(new { Error = "User with that email not found." });
+                }
+                return Ok(new { Message = "Password reset successfully." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An unexpected error occurred during password reset.");
+                return StatusCode(500, new { Error = "An unexpected error occurred during password reset." });
+            }
+        }
     }
 }
