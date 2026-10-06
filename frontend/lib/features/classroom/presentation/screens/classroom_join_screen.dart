@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'live_classroom_screen.dart';
+import 'virtual_classroom_screen.dart';
 
 class ClassroomJoinScreen extends StatefulWidget {
   const ClassroomJoinScreen({super.key});
@@ -17,7 +17,7 @@ class _ClassroomJoinScreenState extends State<ClassroomJoinScreen> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => LiveClassroomScreen(conferenceID: roomId),
+          builder: (context) => VirtualClassroomScreen(roomName: roomId),
         ),
       );
     }

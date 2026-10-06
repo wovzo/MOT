@@ -14,6 +14,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<Habit> Habits { get; set; }
     public DbSet<HabitCompletion> HabitCompletions { get; set; }
     public DbSet<StudySession> StudySessions { get; set; }
+    public DbSet<RoomParticipant> RoomParticipants { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
