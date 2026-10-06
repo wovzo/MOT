@@ -42,6 +42,17 @@ class AuthRepository {
     }
   }
 
+  Future<void> resetPassword(String email, String newPassword) async {
+    try {
+      await _networkClient.dio.post('auth/reset-password', data: {
+        'email': email,
+        'newPassword': newPassword,
+      });
+    } on DioException catch (e) {
+      throw Exception(_extractErrorMessage(e, 'Reset password failed'));
+    }
+  }
+
   Future<UserProfile> getProfile() async {
     try {
       final response = await _networkClient.dio.get('auth/me');

@@ -20,6 +20,8 @@ class _TimerScreenState extends State<TimerScreen> {
   Timer? _timer;
   int _elapsedSeconds = 0;
   bool _isRunning = false;
+  bool _isPomodoro = false;
+  static const int _pomodoroDuration = 25 * 60; // 25 minutes
 
   final TextEditingController _titleController = TextEditingController(text: "Focus Session");
 
@@ -52,8 +54,15 @@ class _TimerScreenState extends State<TimerScreen> {
           _timer?.cancel();
           _activeSession = activeSession;
           _titleController.text = activeSession.title;
+          
           final elapsed = DateTime.now().toUtc().difference(activeSession.startTime.toUtc()).inSeconds;
+          
+          // Determine if it was likely a pomodoro (just a heuristic, or default to stopwatch if resumed)
+          // For simplicity, we just resume as stopwatch if we don't know. 
+          // If they want persistent pomodoro state, it needs backend support.
+          _isPomodoro = false;
           _elapsedSeconds = elapsed > 0 ? elapsed : 0;
+          
           _isRunning = true;
           _startTimer();
         }
@@ -83,7 +92,7 @@ class _TimerScreenState extends State<TimerScreen> {
       setState(() {
         _timer?.cancel();
         _activeSession = session;
-        _elapsedSeconds = 0;
+        _elapsedSeconds = _isPomodoro ? _pomodoroDuration : 0;
         _isRunning = true;
       });
       _startTimer();
@@ -126,7 +135,16 @@ class _TimerScreenState extends State<TimerScreen> {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
       setState(() {
-        _elapsedSeconds++;
+        if (_isPomodoro) {
+          if (_elapsedSeconds > 0) {
+            _elapsedSeconds--;
+          } else {
+            // Pomodoro finished
+            _endSession();
+          }
+        } else {
+          _elapsedSeconds++;
+        }
       });
     });
   }
@@ -164,9 +182,9 @@ class _TimerScreenState extends State<TimerScreen> {
         children: [
           const SizedBox(height: 20),
           _buildTimerDisplay(),
-          const SizedBox(height: 40),
+          const SizedBox(height: 30),
           _buildControls(),
-          const SizedBox(height: 40),
+          const SizedBox(height: 30),
           const Divider(color: Colors.white24),
           const Padding(
             padding: EdgeInsets.all(16.0),
@@ -213,6 +231,33 @@ class _TimerScreenState extends State<TimerScreen> {
     if (_activeSession == null) {
       return Column(
         children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ChoiceChip(
+                label: const Text('Stopwatch'),
+                selected: !_isPomodoro,
+                onSelected: (val) {
+                  if (val) setState(() => _isPomodoro = false);
+                },
+                selectedColor: const Color(0xFF6C5CE7),
+                backgroundColor: Colors.white12,
+                labelStyle: TextStyle(color: !_isPomodoro ? Colors.white : Colors.white54),
+              ),
+              const SizedBox(width: 16),
+              ChoiceChip(
+                label: const Text('Pomodoro (25m)'),
+                selected: _isPomodoro,
+                onSelected: (val) {
+                  if (val) setState(() => _isPomodoro = true);
+                },
+                selectedColor: const Color(0xFF6C5CE7),
+                backgroundColor: Colors.white12,
+                labelStyle: TextStyle(color: _isPomodoro ? Colors.white : Colors.white54),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 40),
             child: TextField(
@@ -234,7 +279,7 @@ class _TimerScreenState extends State<TimerScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
             ),
-            child: const Text('START FOCUS', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            child: const Text('START FOCUS', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
           ),
         ],
       );

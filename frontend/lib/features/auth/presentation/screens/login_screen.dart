@@ -37,6 +37,54 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
+  Future<void> _showForgotPasswordDialog() async {
+    final emailController = TextEditingController();
+    final newPasswordController = TextEditingController();
+    
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1A3C),
+        title: const Text('Reset Password', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Since email isn\'t configured, you can reset your password directly here for now.', style: TextStyle(color: Colors.white70, fontSize: 12)),
+            const SizedBox(height: 16),
+            CustomTextField(label: 'Email', controller: emailController),
+            const SizedBox(height: 16),
+            CustomTextField(label: 'New Password', controller: newPasswordController, obscureText: true),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (emailController.text.isEmpty || newPasswordController.text.isEmpty) return;
+              try {
+                final repo = ref.read(authRepositoryProvider);
+                await repo.resetPassword(emailController.text, newPasswordController.text);
+                if (mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password reset successfully!')));
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6C5CE7)),
+            child: const Text('Reset Password', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -52,14 +100,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               CustomTextField(label: 'Email', controller: _emailController),
               const SizedBox(height: 16),
               CustomTextField(label: 'Password', controller: _passwordController, obscureText: true),
-              const SizedBox(height: 32),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: _showForgotPasswordDialog,
+                  child: const Text('Forgot Password?', style: TextStyle(color: Color(0xFF00D9C0))),
+                ),
+              ),
+              const SizedBox(height: 16),
               PrimaryButton(text: 'Login', onPressed: _login, isLoading: _isLoading),
               const SizedBox(height: 16),
               TextButton(
                 onPressed: () {
                   Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterScreen()));
                 },
-                child: const Text('Don\'t have an account? Sign up'),
+                child: const Text('Don\'t have an account? Sign up', style: TextStyle(color: Colors.white70)),
               ),
             ],
           ),

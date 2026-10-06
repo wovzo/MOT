@@ -6,8 +6,8 @@ class NetworkClient {
 
   NetworkClient() : _dio = Dio(BaseOptions(
     baseUrl: 'https://mot-dalx.onrender.com/api/', // Using public Render URL
-    connectTimeout: const Duration(seconds: 15),
-    receiveTimeout: const Duration(seconds: 15),
+    connectTimeout: const Duration(seconds: 120),
+    receiveTimeout: const Duration(seconds: 120),
   )) {
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {

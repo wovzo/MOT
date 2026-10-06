@@ -4,6 +4,7 @@ import '../../../../core/theme.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../auth/presentation/screens/login_screen.dart';
 import '../../data/models/user_profile.dart';
+import 'settings_screen.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -33,7 +34,7 @@ class ProfileScreen extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.settings_rounded),
             onPressed: () {
-              // TODO: Navigate to settings
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
             },
           )
         ],
