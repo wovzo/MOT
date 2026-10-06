@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -11,32 +11,14 @@ namespace MOT.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<Guid>(
-                name: "ActiveUserId",
-                table: "StudySessions",
-                type: "char(36)",
-                nullable: true,
-                computedColumnSql: "CASE WHEN `IsCompleted` = 0 AND `EndTime` IS NULL THEN `UserId` ELSE NULL END",
-                stored: true,
-                collation: "ascii_general_ci");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_StudySessions_ActiveUserId",
-                table: "StudySessions",
-                column: "ActiveUserId",
-                unique: true);
+            // Active study session invariant (!IsCompleted && EndTime == null) is enforced at application layer
+            // via StartStudySessionCommandHandler throwing ActiveStudySessionAlreadyExistsException (HTTP 409 Conflict).
+            // Stored generated column UNIQUE indexing is unsupported on the host MariaDB 10.11 engine.
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropIndex(
-                name: "IX_StudySessions_ActiveUserId",
-                table: "StudySessions");
-
-            migrationBuilder.DropColumn(
-                name: "ActiveUserId",
-                table: "StudySessions");
         }
     }
 }

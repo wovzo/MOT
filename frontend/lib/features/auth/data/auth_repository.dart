@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/network_client.dart';
@@ -68,13 +69,27 @@ class AuthRepository {
 
   String _extractErrorMessage(DioException e, String defaultMessage) {
     final data = e.response?.data;
-    if (data is Map) {
-      if (data['error'] != null && data['error'].toString().isNotEmpty) {
-        return data['error'].toString();
+    dynamic mapData = data;
+    if (data is String) {
+      try {
+        mapData = jsonDecode(data);
+      } catch (_) {}
+    }
+    if (mapData is Map) {
+      for (final key in ['error', 'Error', 'message', 'Message']) {
+        if (mapData[key] != null && mapData[key].toString().isNotEmpty) {
+          return mapData[key].toString();
+        }
       }
-      if (data['Error'] != null && data['Error'].toString().isNotEmpty) {
-        return data['Error'].toString();
+      if (mapData['errors'] is List && (mapData['errors'] as List).isNotEmpty) {
+        return (mapData['errors'] as List).first.toString();
       }
+      if (mapData['Errors'] is List && (mapData['Errors'] as List).isNotEmpty) {
+        return (mapData['Errors'] as List).first.toString();
+      }
+    }
+    if (e.message != null && e.message!.isNotEmpty) {
+      return e.message!;
     }
     return defaultMessage;
   }
