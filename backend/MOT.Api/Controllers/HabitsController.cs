@@ -62,6 +62,25 @@ namespace MOT.Api.Controllers
             }
         }
 
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetHabitById(Guid id)
+        {
+            try
+            {
+                var habit = await _mediator.Send(new GetHabitByIdQuery(id));
+                return Ok(habit);
+            }
+            catch (HabitNotFoundException ex)
+            {
+                return NotFound(new { Error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An unexpected error occurred while retrieving habit {HabitId}.", id);
+                return StatusCode(500, new { Error = "An unexpected error occurred while retrieving habit." });
+            }
+        }
+
         [HttpPost("{id}/toggle")]
         public async Task<IActionResult> ToggleHabit(Guid id)
         {
@@ -83,6 +102,50 @@ namespace MOT.Api.Controllers
             {
                 _logger.LogError(ex, "An unexpected error occurred while toggling habit {HabitId}.", id);
                 return StatusCode(500, new { Error = "An unexpected error occurred while toggling habit." });
+            }
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateHabit(Guid id, [FromBody] UpdateHabitCommand command)
+        {
+            try
+            {
+                command.Id = id;
+                var updated = await _mediator.Send(command);
+                return Ok(updated);
+            }
+            catch (HabitNotFoundException ex)
+            {
+                return NotFound(new { Error = ex.Message });
+            }
+            catch (FluentValidation.ValidationException ex)
+            {
+                var errors = ex.Errors.Select(e => e.ErrorMessage).ToList();
+                return BadRequest(new { Error = errors.FirstOrDefault() ?? "Validation failed.", Errors = errors });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An unexpected error occurred while updating habit {HabitId}.", id);
+                return StatusCode(500, new { Error = "An unexpected error occurred while updating habit." });
+            }
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteHabit(Guid id)
+        {
+            try
+            {
+                await _mediator.Send(new DeleteHabitCommand(id));
+                return NoContent();
+            }
+            catch (HabitNotFoundException ex)
+            {
+                return NotFound(new { Error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An unexpected error occurred while deleting habit {HabitId}.", id);
+                return StatusCode(500, new { Error = "An unexpected error occurred while deleting habit." });
             }
         }
     }

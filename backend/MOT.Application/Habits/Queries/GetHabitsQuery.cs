@@ -37,57 +37,7 @@ namespace MOT.Application.Habits.Queries
                 .OrderBy(h => h.CreatedAt)
                 .ToListAsync(cancellationToken);
 
-            var today = DateTime.UtcNow.Date;
-            var result = new List<HabitDto>();
-
-            foreach (var habit in habits)
-            {
-                var completionDates = habit.Completions
-                    .Select(c => c.Date.Date)
-                    .Distinct()
-                    .OrderByDescending(d => d)
-                    .ToList();
-
-                bool isCompletedToday = completionDates.Contains(today);
-                int streak = 0;
-                var checkDate = today;
-
-                // If not completed today, we start checking from yesterday to see the active streak
-                if (!isCompletedToday)
-                {
-                    checkDate = today.AddDays(-1);
-                }
-
-                foreach (var date in completionDates)
-                {
-                    if (date == checkDate)
-                    {
-                        streak++;
-                        checkDate = checkDate.AddDays(-1);
-                    }
-                    else if (date > checkDate)
-                    {
-                        // Skip if date is in the future relative to checkDate
-                        continue;
-                    }
-                    else
-                    {
-                        // Streak broken
-                        break;
-                    }
-                }
-
-                result.Add(new HabitDto
-                {
-                    Id = habit.Id,
-                    Title = habit.Title,
-                    Description = habit.Description,
-                    IsCompletedToday = isCompletedToday,
-                    CurrentStreak = streak
-                });
-            }
-
-            return result;
+            return habits.Select(h => HabitStreakCalculator.ToDto(h)).ToList();
         }
     }
 }

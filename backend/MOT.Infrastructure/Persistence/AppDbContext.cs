@@ -66,5 +66,16 @@ public class AppDbContext : DbContext, IAppDbContext
             entity.HasIndex(e => new { e.RoomName, e.UserId })
                   .IsUnique();
         });
+
+        modelBuilder.Entity<HabitCompletion>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasOne(e => e.Habit)
+                  .WithMany(e => e.Completions)
+                  .HasForeignKey(e => e.HabitId)
+                  .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => new { e.HabitId, e.Date })
+                  .IsUnique();
+        });
     }
 }

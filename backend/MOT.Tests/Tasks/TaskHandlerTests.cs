@@ -553,4 +553,269 @@ public class TaskHandlerTests
                 It.Is<Func<It.IsAnyType, Exception?, string>>((v, t) => true)),
             Times.Once);
     }
+
+    // ==========================================
+    // Phase 3: Daily Task CRUD Tests
+    // ==========================================
+
+    [Fact]
+    public async Task GetTaskById_WhenTaskExistsForUser_ReturnsTaskDto()
+    {
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var task = new DailyTask
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Read Biology",
+            Description = "Chapter 4",
+            IsCompleted = false,
+            CreatedAt = DateTime.UtcNow
+        };
+        _tasks.Add(task);
+
+        var handler = new GetTaskByIdQueryHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var result = await handler.Handle(new GetTaskByIdQuery(task.Id), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result.Id.Should().Be(task.Id);
+        result.Title.Should().Be("Read Biology");
+        result.Description.Should().Be("Chapter 4");
+        result.IsCompleted.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetTaskById_WhenTaskDoesNotExist_ThrowsTaskNotFoundException()
+    {
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var handler = new GetTaskByIdQueryHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var nonExistentId = Guid.NewGuid();
+
+        Func<Task> act = async () => await handler.Handle(new GetTaskByIdQuery(nonExistentId), CancellationToken.None);
+
+        await act.Should().ThrowAsync<TaskNotFoundException>();
+    }
+
+    [Fact]
+    public async Task GetTaskById_WhenTaskBelongsToDifferentUser_ThrowsTaskNotFoundException()
+    {
+        var userA = Guid.NewGuid();
+        var userB = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userA.ToString());
+
+        var task = new DailyTask
+        {
+            Id = Guid.NewGuid(),
+            UserId = userB, // Belongs to User B
+            Title = "User B Private Task"
+        };
+        _tasks.Add(task);
+
+        var handler = new GetTaskByIdQueryHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        Func<Task> act = async () => await handler.Handle(new GetTaskByIdQuery(task.Id), CancellationToken.None);
+
+        // Security boundary: User A cannot read User B's task (returns 404, not 200)
+        await act.Should().ThrowAsync<TaskNotFoundException>();
+    }
+
+    [Fact]
+    public async Task UpdateTask_WhenValid_UpdatesFieldsAndPreservesCreatedAt()
+    {
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+        var originalCreated = DateTime.UtcNow.AddDays(-2);
+
+        var task = new DailyTask
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Original Title",
+            Description = "Original Desc",
+            IsCompleted = false,
+            CreatedAt = originalCreated
+        };
+        _tasks.Add(task);
+
+        var handler = new UpdateTaskCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var command = new UpdateTaskCommand
+        {
+            Id = task.Id,
+            Title = "Updated Title",
+            Description = "Updated Desc",
+            IsCompleted = true
+        };
+
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        result.Title.Should().Be("Updated Title");
+        result.Description.Should().Be("Updated Desc");
+        result.IsCompleted.Should().BeTrue();
+        result.CreatedAt.Should().Be(originalCreated);
+
+        task.Title.Should().Be("Updated Title");
+        task.Description.Should().Be("Updated Desc");
+        task.IsCompleted.Should().BeTrue();
+        task.CreatedAt.Should().Be(originalCreated);
+        _dbContextMock.Verify(c => c.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateTask_WhenTaskBelongsToDifferentUser_ThrowsTaskNotFoundException()
+    {
+        var userA = Guid.NewGuid();
+        var userB = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userA.ToString());
+
+        var task = new DailyTask
+        {
+            Id = Guid.NewGuid(),
+            UserId = userB,
+            Title = "User B Task",
+            Description = "Secret"
+        };
+        _tasks.Add(task);
+
+        var handler = new UpdateTaskCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var command = new UpdateTaskCommand
+        {
+            Id = task.Id,
+            Title = "Hacked Title"
+        };
+
+        Func<Task> act = async () => await handler.Handle(command, CancellationToken.None);
+
+        // Security boundary: User A cannot modify User B's task
+        await act.Should().ThrowAsync<TaskNotFoundException>();
+        task.Title.Should().Be("User B Task"); // Unchanged
+    }
+
+    [Fact]
+    public void UpdateTaskCommandValidator_ValidatesTitleLengthAndPresence()
+    {
+        var validator = new UpdateTaskCommandValidator();
+
+        var validCommand = new UpdateTaskCommand
+        {
+            Id = Guid.NewGuid(),
+            Title = "Valid Task",
+            Description = "Short description"
+        };
+        validator.Validate(validCommand).IsValid.Should().BeTrue();
+
+        var emptyTitleCommand = new UpdateTaskCommand
+        {
+            Id = Guid.NewGuid(),
+            Title = ""
+        };
+        validator.Validate(emptyTitleCommand).IsValid.Should().BeFalse();
+
+        var overlongTitleCommand = new UpdateTaskCommand
+        {
+            Id = Guid.NewGuid(),
+            Title = new string('A', 101)
+        };
+        validator.Validate(overlongTitleCommand).IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeleteTask_WhenValid_RemovesTaskFromDb()
+    {
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var task = new DailyTask
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Task to delete"
+        };
+        _tasks.Add(task);
+
+        var handler = new DeleteTaskCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        await handler.Handle(new DeleteTaskCommand(task.Id), CancellationToken.None);
+
+        _tasks.Should().BeEmpty();
+        _dbContextMock.Verify(c => c.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteTask_WhenTaskBelongsToDifferentUser_ThrowsTaskNotFoundExceptionAndDoesNotDelete()
+    {
+        var userA = Guid.NewGuid();
+        var userB = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userA.ToString());
+
+        var task = new DailyTask
+        {
+            Id = Guid.NewGuid(),
+            UserId = userB,
+            Title = "User B Task"
+        };
+        _tasks.Add(task);
+
+        var handler = new DeleteTaskCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        Func<Task> act = async () => await handler.Handle(new DeleteTaskCommand(task.Id), CancellationToken.None);
+
+        await act.Should().ThrowAsync<TaskNotFoundException>();
+        _tasks.Should().HaveCount(1); // Task was NOT deleted
+    }
+
+    [Fact]
+    public async Task TasksController_GetTaskById_ReturnsOkWhenFound()
+    {
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<TasksController>>();
+        var taskId = Guid.NewGuid();
+        var dto = new DailyTaskDto(taskId, "Test Task", null, false, DateTime.UtcNow);
+
+        mediatorMock.Setup(m => m.Send(It.Is<GetTaskByIdQuery>(q => q.Id == taskId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(dto);
+
+        var controller = new TasksController(mediatorMock.Object, loggerMock.Object);
+        var result = await controller.GetTaskById(taskId);
+
+        var okResult = result.Should().BeOfType<OkObjectResult>().Subject;
+        okResult.StatusCode.Should().Be(200);
+        okResult.Value.Should().Be(dto);
+    }
+
+    [Fact]
+    public async Task TasksController_UpdateTask_ReturnsOkWhenSuccessful()
+    {
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<TasksController>>();
+        var taskId = Guid.NewGuid();
+        var command = new UpdateTaskCommand { Title = "Updated" };
+        var dto = new DailyTaskDto(taskId, "Updated", null, false, DateTime.UtcNow);
+
+        mediatorMock.Setup(m => m.Send(It.Is<UpdateTaskCommand>(c => c.Id == taskId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(dto);
+
+        var controller = new TasksController(mediatorMock.Object, loggerMock.Object);
+        var result = await controller.UpdateTask(taskId, command);
+
+        var okResult = result.Should().BeOfType<OkObjectResult>().Subject;
+        okResult.StatusCode.Should().Be(200);
+    }
+
+    [Fact]
+    public async Task TasksController_DeleteTask_ReturnsNoContentWhenSuccessful()
+    {
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<TasksController>>();
+        var taskId = Guid.NewGuid();
+
+        mediatorMock.Setup(m => m.Send(It.Is<DeleteTaskCommand>(c => c.Id == taskId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MediatR.Unit.Value);
+
+        var controller = new TasksController(mediatorMock.Object, loggerMock.Object);
+        var result = await controller.DeleteTask(taskId);
+
+        result.Should().BeOfType<NoContentResult>();
+    }
 }

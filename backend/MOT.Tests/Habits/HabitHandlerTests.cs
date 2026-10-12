@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using FluentValidation.Results;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using MOT.Api.Controllers;
@@ -502,5 +503,323 @@ public class HabitHandlerTests
         // Assert
         var statusResult = result.Should().BeOfType<ObjectResult>().Subject;
         statusResult.StatusCode.Should().Be(500);
+    }
+
+    // ==========================================
+    // Phase 3: Habit CRUD and Concurrency Tests
+    // ==========================================
+
+    [Fact]
+    public async Task GetHabitById_WhenHabitExistsForUser_ReturnsHabitDtoWithStreak()
+    {
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+        var today = DateTime.UtcNow.Date;
+
+        var habit = new Habit
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Read Books",
+            Description = "30 mins daily"
+        };
+        var c1 = new HabitCompletion { Id = Guid.NewGuid(), HabitId = habit.Id, Date = today };
+        var c2 = new HabitCompletion { Id = Guid.NewGuid(), HabitId = habit.Id, Date = today.AddDays(-1) };
+        habit.Completions.Add(c1);
+        habit.Completions.Add(c2);
+        _habits.Add(habit);
+        _completions.Add(c1);
+        _completions.Add(c2);
+
+        var handler = new GetHabitByIdQueryHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var result = await handler.Handle(new GetHabitByIdQuery(habit.Id), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result.Id.Should().Be(habit.Id);
+        result.Title.Should().Be("Read Books");
+        result.IsCompletedToday.Should().BeTrue();
+        result.CurrentStreak.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task GetHabitById_WhenHabitDoesNotExist_ThrowsHabitNotFoundException()
+    {
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var handler = new GetHabitByIdQueryHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var nonExistentId = Guid.NewGuid();
+
+        Func<Task> act = async () => await handler.Handle(new GetHabitByIdQuery(nonExistentId), CancellationToken.None);
+
+        await act.Should().ThrowAsync<HabitNotFoundException>();
+    }
+
+    [Fact]
+    public async Task GetHabitById_WhenHabitBelongsToDifferentUser_ThrowsHabitNotFoundException()
+    {
+        var userA = Guid.NewGuid();
+        var userB = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userA.ToString());
+
+        var habit = new Habit
+        {
+            Id = Guid.NewGuid(),
+            UserId = userB, // Belongs to User B
+            Title = "User B Habit"
+        };
+        _habits.Add(habit);
+
+        var handler = new GetHabitByIdQueryHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        Func<Task> act = async () => await handler.Handle(new GetHabitByIdQuery(habit.Id), CancellationToken.None);
+
+        // Security boundary: User A cannot read User B's habit
+        await act.Should().ThrowAsync<HabitNotFoundException>();
+    }
+
+    [Fact]
+    public async Task UpdateHabit_WhenValid_UpdatesFieldsAndPreservesHistoricalCompletionsAndStreak()
+    {
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+        var today = DateTime.UtcNow.Date;
+
+        var habit = new Habit
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Morning Run",
+            Description = "Run 3km"
+        };
+        // 3 consecutive days of completions
+        var c1 = new HabitCompletion { Id = Guid.NewGuid(), HabitId = habit.Id, Date = today };
+        var c2 = new HabitCompletion { Id = Guid.NewGuid(), HabitId = habit.Id, Date = today.AddDays(-1) };
+        var c3 = new HabitCompletion { Id = Guid.NewGuid(), HabitId = habit.Id, Date = today.AddDays(-2) };
+        habit.Completions.Add(c1);
+        habit.Completions.Add(c2);
+        habit.Completions.Add(c3);
+        _habits.Add(habit);
+        _completions.Add(c1);
+        _completions.Add(c2);
+        _completions.Add(c3);
+
+        var handler = new UpdateHabitCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var command = new UpdateHabitCommand
+        {
+            Id = habit.Id,
+            Title = "Morning Sprint",
+            Description = "Sprint 5km"
+        };
+
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        result.Title.Should().Be("Morning Sprint");
+        result.Description.Should().Be("Sprint 5km");
+        // CRITICAL: Historical completions must be intact, and streak must NOT be reset!
+        habit.Completions.Should().HaveCount(3);
+        result.CurrentStreak.Should().Be(3);
+        result.IsCompletedToday.Should().BeTrue();
+
+        _dbContextMock.Verify(c => c.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateHabit_WhenHabitBelongsToDifferentUser_ThrowsHabitNotFoundException()
+    {
+        var userA = Guid.NewGuid();
+        var userB = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userA.ToString());
+
+        var habit = new Habit
+        {
+            Id = Guid.NewGuid(),
+            UserId = userB,
+            Title = "User B Habit"
+        };
+        _habits.Add(habit);
+
+        var handler = new UpdateHabitCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var command = new UpdateHabitCommand
+        {
+            Id = habit.Id,
+            Title = "Tampered Title"
+        };
+
+        Func<Task> act = async () => await handler.Handle(command, CancellationToken.None);
+
+        await act.Should().ThrowAsync<HabitNotFoundException>();
+        habit.Title.Should().Be("User B Habit"); // Unchanged
+    }
+
+    [Fact]
+    public void UpdateHabitCommandValidator_ValidatesTitleLengthAndPresence()
+    {
+        var validator = new UpdateHabitCommandValidator();
+
+        var valid = new UpdateHabitCommand { Id = Guid.NewGuid(), Title = "Valid Habit", Description = "Desc" };
+        validator.Validate(valid).IsValid.Should().BeTrue();
+
+        var emptyTitle = new UpdateHabitCommand { Id = Guid.NewGuid(), Title = "" };
+        validator.Validate(emptyTitle).IsValid.Should().BeFalse();
+
+        var overlongTitle = new UpdateHabitCommand { Id = Guid.NewGuid(), Title = new string('A', 101) };
+        validator.Validate(overlongTitle).IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeleteHabit_WhenValid_RemovesHabitAndCompletionsFromDb()
+    {
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var habit = new Habit
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Habit to delete"
+        };
+        var comp = new HabitCompletion { Id = Guid.NewGuid(), HabitId = habit.Id, Date = DateTime.UtcNow.Date };
+        habit.Completions.Add(comp);
+        _habits.Add(habit);
+        _completions.Add(comp);
+
+        var handler = new DeleteHabitCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        await handler.Handle(new DeleteHabitCommand(habit.Id), CancellationToken.None);
+
+        _habits.Should().BeEmpty();
+        _completions.Should().BeEmpty();
+        _dbContextMock.Verify(c => c.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteHabit_WhenHabitBelongsToDifferentUser_ThrowsHabitNotFoundExceptionAndDoesNotDelete()
+    {
+        var userA = Guid.NewGuid();
+        var userB = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userA.ToString());
+
+        var habit = new Habit
+        {
+            Id = Guid.NewGuid(),
+            UserId = userB,
+            Title = "User B Habit"
+        };
+        _habits.Add(habit);
+
+        var handler = new DeleteHabitCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        Func<Task> act = async () => await handler.Handle(new DeleteHabitCommand(habit.Id), CancellationToken.None);
+
+        await act.Should().ThrowAsync<HabitNotFoundException>();
+        _habits.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task ToggleHabitCompletion_WhenConcurrentRaceOccurs_HandlesCollisionGracefully()
+    {
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+        var today = DateTime.UtcNow.Date;
+
+        var habit = new Habit
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Water"
+        };
+        _habits.Add(habit);
+
+        // Simulate database constraint collision (MariaDB 1062 duplicate key) on SaveChangesAsync
+        _dbContextMock.Setup(c => c.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("Duplicate entry for key 'IX_HabitCompletions_HabitId_Date'", new Exception("1062")));
+
+        var handler = new ToggleHabitCompletionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var result = await handler.Handle(new ToggleHabitCompletionCommand { HabitId = habit.Id }, CancellationToken.None);
+
+        // When duplicate race condition occurs on adding completion, handler catches it and idempotently returns true
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ToggleHabitCompletion_WhenUntogglingWithMultipleEntries_RemovesAllEntriesForToday()
+    {
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+        var today = DateTime.UtcNow.Date;
+
+        var habit = new Habit
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Meditation"
+        };
+        _habits.Add(habit);
+
+        // Suppose 2 duplicate entries existed for today
+        var c1 = new HabitCompletion { Id = Guid.NewGuid(), HabitId = habit.Id, Date = today };
+        var c2 = new HabitCompletion { Id = Guid.NewGuid(), HabitId = habit.Id, Date = today };
+        _completions.Add(c1);
+        _completions.Add(c2);
+
+        var handler = new ToggleHabitCompletionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var result = await handler.Handle(new ToggleHabitCompletionCommand { HabitId = habit.Id }, CancellationToken.None);
+
+        result.Should().BeFalse(); // Now toggled off
+        _completions.Should().BeEmpty(); // Both entries removed cleanly
+    }
+
+    [Fact]
+    public async Task HabitsController_GetHabitById_ReturnsOkWhenFound()
+    {
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<HabitsController>>();
+        var habitId = Guid.NewGuid();
+        var dto = new HabitDto { Id = habitId, Title = "Habit", CurrentStreak = 5, IsCompletedToday = true };
+
+        mediatorMock.Setup(m => m.Send(It.Is<GetHabitByIdQuery>(q => q.Id == habitId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(dto);
+
+        var controller = new HabitsController(mediatorMock.Object, loggerMock.Object);
+        var result = await controller.GetHabitById(habitId);
+
+        var okResult = result.Should().BeOfType<OkObjectResult>().Subject;
+        okResult.StatusCode.Should().Be(200);
+        okResult.Value.Should().Be(dto);
+    }
+
+    [Fact]
+    public async Task HabitsController_UpdateHabit_ReturnsOkWhenSuccessful()
+    {
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<HabitsController>>();
+        var habitId = Guid.NewGuid();
+        var command = new UpdateHabitCommand { Title = "Updated" };
+        var dto = new HabitDto { Id = habitId, Title = "Updated" };
+
+        mediatorMock.Setup(m => m.Send(It.Is<UpdateHabitCommand>(c => c.Id == habitId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(dto);
+
+        var controller = new HabitsController(mediatorMock.Object, loggerMock.Object);
+        var result = await controller.UpdateHabit(habitId, command);
+
+        var okResult = result.Should().BeOfType<OkObjectResult>().Subject;
+        okResult.StatusCode.Should().Be(200);
+    }
+
+    [Fact]
+    public async Task HabitsController_DeleteHabit_ReturnsNoContentWhenSuccessful()
+    {
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<HabitsController>>();
+        var habitId = Guid.NewGuid();
+
+        mediatorMock.Setup(m => m.Send(It.Is<DeleteHabitCommand>(c => c.Id == habitId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MediatR.Unit.Value);
+
+        var controller = new HabitsController(mediatorMock.Object, loggerMock.Object);
+        var result = await controller.DeleteHabit(habitId);
+
+        result.Should().BeOfType<NoContentResult>();
     }
 }

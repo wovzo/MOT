@@ -439,6 +439,109 @@ Phase 2 hardened the virtual classroom backend (`ClassroomsController`, `Classro
     - Controller HTTP status mapping (400, 401, 404, 409, 500).
 - **Remote DB Protection:** Strict constraint honored — migrations were not applied to remote production MariaDB database.
 
+## Phase 3 — Daily Task and Habit CRUD Implementation
+
+**Status: IMPLEMENTATION & VERIFICATION COMPLETE**
+
+Phase 3 implemented and verified the missing CRUD operations for Daily Tasks and Habits in the MOT backend, preserving all existing API contracts and Flutter compatibility while hardening data ownership and concurrency.
+
+### A. Daily Task CRUD Endpoints & Implementation
+1. **`GET /api/tasks/{id}` (`GetTaskByIdQuery`):**
+   - Retrieves single task scoped strictly to authenticated `UserId` from `ICurrentUserService`.
+   - Returns `200 OK` (`DailyTaskDto`).
+   - If task does not exist or belongs to another user: throws `TaskNotFoundException` (mapped to `404 Not Found`).
+2. **`PUT /api/tasks/{id}` (`UpdateTaskCommand`):**
+   - Validates input via FluentValidation (`UpdateTaskCommandValidator`): `Title` required (max 100 chars), `Description` optional (max 1000 chars).
+   - Scoped strictly to authenticated `UserId`.
+   - Updates `Title`, `Description`, and optional `IsCompleted` status while preserving `CreatedAt` and `UserId`.
+   - Returns `200 OK` (`DailyTaskDto`).
+   - Throws `TaskNotFoundException` (`404 Not Found`) if task does not exist or belongs to another user.
+3. **`DELETE /api/tasks/{id}` (`DeleteTaskCommand`):**
+   - Scoped strictly to authenticated `UserId`.
+   - Removes task from database.
+   - Returns `204 NoContent`.
+   - Throws `TaskNotFoundException` (`404 Not Found`) if task does not exist or belongs to another user.
+
+### B. Habit CRUD Endpoints & Streak Preservation
+1. **`GET /api/habits/{id}` (`GetHabitByIdQuery`):**
+   - Retrieves single habit scoped strictly to authenticated `UserId`.
+   - Computes consecutive streaks and today's completion status via centralized `HabitStreakCalculator`.
+   - Returns `200 OK` (`HabitDto`).
+   - Throws `HabitNotFoundException` (`404 Not Found`) if habit does not exist or belongs to another user.
+2. **`PUT /api/habits/{id}` (`UpdateHabitCommand`):**
+   - Validates input via FluentValidation (`UpdateHabitCommandValidator`): `Title` required (max 100 chars), `Description` optional (max 1000 chars).
+   - Scoped strictly to authenticated `UserId`.
+   - **Critical History Preservation:** Updates only `Title` and `Description`. Historical `HabitCompletion` records, completion dates, and `CreatedAt` remain completely untouched, ensuring streaks and historical data are preserved without reset.
+   - Returns `200 OK` (`HabitDto`).
+   - Throws `HabitNotFoundException` (`404 Not Found`) if habit does not exist or belongs to another user.
+3. **`DELETE /api/habits/{id}` (`DeleteHabitCommand`):**
+   - Scoped strictly to authenticated `UserId`.
+   - Removes habit and cleans up child completions cleanly per the existing design's relational cascade behavior (`FK_HabitCompletions_Habits_HabitId` with `ON DELETE CASCADE`).
+   - Returns `204 NoContent`.
+   - Throws `HabitNotFoundException` (`404 Not Found`) if habit does not exist or belongs to another user.
+
+### C. Concurrency-Aware Habit Completion Hardening
+1. **Unique Index Gap & Correction:**
+   - Empirical inspection of MariaDB 10.11 revealed `HabitCompletions` previously had only a non-unique index on `HabitId`.
+   - Configured composite unique index `IX_HabitCompletions_HabitId_Date` on `(HabitId, Date)` in `AppDbContext.cs`.
+   - Generated local migration `20261012175608_AddUniqueIndexToHabitCompletions`.
+   - In accordance with project constraints, migration was **NOT** run against the remote database.
+2. **Concurrency-Safe Toggle Handler:**
+   - `ToggleHabitCompletionCommandHandler` handles duplicate daily insertion collisions via `try/catch` on `DbUpdateException` (MariaDB Error 1062 / Duplicate Key).
+   - If two concurrent requests attempt to complete a habit on the same day, the second request safely detaches the duplicate candidate entity and idempotently returns `true`.
+   - When untoggling, `RemoveRange` cleanses any duplicate records for the current date, guaranteeing idempotency.
+
+### D. Verification & Test Suite
+- **API Project Build:** `dotnet build MOT.Api/MOT.Api.csproj` succeeded with 0 errors and 0 warnings.
+- **Backend Test Suite:** `dotnet test MOT.Tests/MOT.Tests.csproj` executed: **193/193 passed (100%)**:
+  - 169 existing baseline tests.
+  - 24 new tests in `TaskHandlerTests.cs` and `HabitHandlerTests.cs`:
+    - Daily task retrieval by ID, update, and deletion.
+    - Habit retrieval by ID, update, and deletion.
+    - Verification that habit edits preserve historical completions and active streaks.
+    - Cross-user authorization boundaries (User A cannot access or modify User B's tasks or habits).
+    - FluentValidation failure handling (empty and overlong titles).
+    - Nonexistent ID handling (`404 Not Found`).
+    - Concurrency collision handling on habit completion toggle (MariaDB Error 1062).
+    - Controller HTTP status mapping (200, 204, 400, 401, 404, 500).
+- **Frontend Test Suite:** `flutter test` executed: **14/14 passed (100%)**.
+- **Model Snapshot Sync:** `dotnet ef migrations has-pending-model-changes` verified: 0 pending changes.
+- **Remote DB Protection:** Strict constraint honored — migrations were not applied to remote production MariaDB database.
+
+## Phase 3 Verification: Habit Completion, Concurrency, and Deletion Safety
+
+**Status: VERIFIED & CONFIRMED**
+
+A targeted verification of three specific risk areas was conducted against the actual source code, generated migration, MariaDB schema, and real multithreaded database tests.
+
+### 1. Unique Index and Migration Safety Check
+- **Data Type & Date Normalization:** `HabitCompletions.Date` is stored as `datetime(6)` in MariaDB. In `HabitCompletion.cs`, the `Date` property has been encapsulated with a backing field `set => _date = value.Date;`, guaranteeing that no caller can store a non-zero time component. All completion queries (`ToggleHabitCompletionCommand`, `GetHabitsQuery`, `HabitStreakCalculator`) normalize to midnight UTC (`DateTime.UtcNow.Date`).
+- **Existing Production Data Audit:** Read-only queries against the live MariaDB 10.11 host verified that `HabitCompletions` currently contains 0 records. There are **0 duplicate entries** blocking unique index creation.
+- **Migration Order Defect Identified & Corrected:** Testing on a disposable MariaDB table revealed that EF Core scaffolded `DropIndex("IX_HabitCompletions_HabitId")` before `CreateIndex("IX_HabitCompletions_HabitId_Date")`. MariaDB rejected this with `Cannot drop index 'IX_HabitCompletions_HabitId': needed in a foreign key constraint` because the foreign key requires an index on `HabitId`. The migration `20261012175608_AddUniqueIndexToHabitCompletions.cs` was corrected to run `CreateIndex` first (whose leading column is `HabitId`), thereby satisfying the foreign key constraint before dropping the redundant index.
+
+### 2. Concurrent Habit Toggle Verification
+- **Real MariaDB Concurrency Test Executed:** Created disposable test table on MariaDB 10.11 with `UNIQUE KEY (HabitId, Date)`. Executed concurrent inserts from two separate database connections synchronized with a threading barrier (`Barrier(2)`).
+  - Thread 2 committed successfully.
+  - Thread 1 was blocked by MariaDB with Error 1062: `Duplicate entry '...-2026-10-12 00:00:00.000000' for key 'IX_HabitCompletions_HabitId_Date'`.
+  - Database content verified: exactly 1 row persisted, 0 duplicate records created.
+- **Collision Detection Hardened:** In `ToggleHabitCompletionCommandHandler`, `IsDuplicateCompletionCollision` checks reflection for error `Number == 1062` as well as index and message keywords, safely detaches the duplicate candidate entity from EF ChangeTracker, and idempotently returns `true`.
+- **Untoggle Idempotency:** Untoggling uses `RemoveRange(todayCompletions)` to purge any duplicate entries for the current date.
+
+### 3. Habit Deletion & History Retention
+- **Relational Cascade Behavior Verified:** Inspection of MariaDB DDL and `20260909161703_AddHabits.cs` confirmed `FK_HabitCompletions_Habits_HabitId` has `ON DELETE CASCADE`. In `DeleteHabitCommandHandler`, child completions are explicitly cleaned up before deleting the habit, ensuring consistent behavior across both in-memory unit test mocks and relational databases.
+- **Data Retention Options Documented:**
+  - *Option A (Current Design):* Hard delete with relational cascade — permanently deletes the habit and its completions. Completely safe from foreign-key constraint violations or orphaned records.
+  - *Option B (Future Architecture):* Soft-delete / Archive pattern — requires adding `IsArchived` (boolean) to `Habit`, updating queries to filter `!h.IsArchived`, and adding UI support in Flutter. Recommended for Phase 4 / future long-term focus analytics if habit history retention is desired.
+
+### 4. Build and Test Summary
+- **Backend API Build:** `dotnet build MOT.Api/MOT.Api.csproj` -> 0 Errors, 0 Warnings.
+- **Backend Test Suite:** `dotnet test MOT.Tests/MOT.Tests.csproj` -> 193/193 passed (100%).
+- **Frontend Test Suite:** `flutter test` -> 14/14 passed (100%).
+- **EF Model Snapshot Check:** 0 pending model changes.
+- **Remote DB Protection:** No migrations were applied to the remote production database.
+
+
+
 
 
 

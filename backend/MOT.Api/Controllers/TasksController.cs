@@ -63,6 +63,25 @@ namespace MOT.Api.Controllers
             }
         }
 
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetTaskById(Guid id)
+        {
+            try
+            {
+                var task = await _mediator.Send(new GetTaskByIdQuery(id));
+                return Ok(task);
+            }
+            catch (TaskNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error in GetTaskById for {TaskId}", id);
+                return StatusCode(StatusCodes.Status500InternalServerError, new { error = "An unexpected error occurred while retrieving the task." });
+            }
+        }
+
         [HttpPatch("{id}/toggle")]
         public async Task<IActionResult> ToggleTask(Guid id)
         {
@@ -79,6 +98,49 @@ namespace MOT.Api.Controllers
             {
                 _logger.LogError(ex, "Unexpected error in ToggleTask");
                 return StatusCode(StatusCodes.Status500InternalServerError, new { error = "An unexpected error occurred while toggling the task." });
+            }
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateTask(Guid id, [FromBody] UpdateTaskCommand command)
+        {
+            try
+            {
+                command.Id = id;
+                var updatedTask = await _mediator.Send(command);
+                return Ok(updatedTask);
+            }
+            catch (ValidationException ex)
+            {
+                return BadRequest(new { error = ex.Errors.First().ErrorMessage });
+            }
+            catch (TaskNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error in UpdateTask for {TaskId}", id);
+                return StatusCode(StatusCodes.Status500InternalServerError, new { error = "An unexpected error occurred while updating the task." });
+            }
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteTask(Guid id)
+        {
+            try
+            {
+                await _mediator.Send(new DeleteTaskCommand(id));
+                return NoContent();
+            }
+            catch (TaskNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error in DeleteTask for {TaskId}", id);
+                return StatusCode(StatusCodes.Status500InternalServerError, new { error = "An unexpected error occurred while deleting the task." });
             }
         }
     }

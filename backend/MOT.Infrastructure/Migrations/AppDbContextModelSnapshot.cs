@@ -92,7 +92,8 @@ namespace MOT.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("HabitId");
+                    b.HasIndex("HabitId", "Date")
+                        .IsUnique();
 
                     b.ToTable("HabitCompletions");
                 });
