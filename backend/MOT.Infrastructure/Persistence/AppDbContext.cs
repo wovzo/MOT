@@ -50,5 +50,21 @@ public class AppDbContext : DbContext, IAppDbContext
             entity.HasIndex(e => e.ActiveUserId)
                   .IsUnique();
         });
+
+        modelBuilder.Entity<RoomParticipant>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.RoomName)
+                  .HasMaxLength(100)
+                  .IsRequired();
+            entity.Property(e => e.Username)
+                  .HasMaxLength(100)
+                  .IsRequired();
+
+            entity.HasIndex(e => new { e.RoomName, e.SeatNumber })
+                  .IsUnique();
+            entity.HasIndex(e => new { e.RoomName, e.UserId })
+                  .IsUnique();
+        });
     }
 }

@@ -114,7 +114,8 @@ namespace MOT.Infrastructure.Migrations
 
                     b.Property<string>("RoomName")
                         .IsRequired()
-                        .HasColumnType("longtext");
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
 
                     b.Property<int>("SeatNumber")
                         .HasColumnType("int");
@@ -124,9 +125,16 @@ namespace MOT.Infrastructure.Migrations
 
                     b.Property<string>("Username")
                         .IsRequired()
-                        .HasColumnType("longtext");
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("RoomName", "SeatNumber")
+                        .IsUnique();
+
+                    b.HasIndex("RoomName", "UserId")
+                        .IsUnique();
 
                     b.ToTable("RoomParticipants");
                 });

@@ -390,6 +390,56 @@ Phase 1 addressed the unauthenticated password-reset vulnerability and reconcile
 - **EF Pending Changes:** `dotnet ef migrations has-pending-model-changes` verified: 0 pending changes.
 - **Database Remote Protection:** Strict constraint honored — migrations were tested on mock/temporary tables without running `database update` against production.
 
+## Phase 2 — MOT Virtual Classroom Backend Hardening
+
+**Status: IMPLEMENTATION & VERIFICATION COMPLETE**
+
+Phase 2 hardened the virtual classroom backend (`ClassroomsController`, `ClassroomHandlers`, `RoomParticipant`, `AppDbContext`) to be fully reliable, secure, and concurrency-safe without rewriting existing architecture or requiring WebRTC/SignalR.
+
+### A. Classroom Business Rules & Constraints
+1. **Maximum Capacity Limit:** Strictly capped at 50 participants (`SeatNumber` 0 through 49). When all 50 seats are occupied, join requests are rejected with `409 Conflict` (`ClassroomFullException`).
+2. **Seat Uniqueness:** A seat cannot be occupied by multiple participants simultaneously. Enforced at the database level by unique composite index `UQ_RoomParticipants_RoomName_SeatNumber` on `(RoomName, SeatNumber)`.
+3. **Single Seat per User:** A user cannot occupy multiple seats in the same classroom simultaneously. Enforced at the database level by unique composite index `UQ_RoomParticipants_RoomName_UserId` on `(RoomName, UserId)`.
+4. **Idempotent Join Requests:** Rejoining an existing room by a user who already has a seat safely updates their ping timestamp and video state without duplicating records or reallocating seats.
+5. **Ownership Isolation:** A user cannot release or ping another user's seat. All operations resolve the authenticated user ID strictly from `ICurrentUserService` claims.
+6. **Stale Participant Auto-Purge:** Participants who have not sent a ping in >60 seconds are automatically purged upon join or participant query operations, reclaiming abandoned seats immediately.
+7. **Request Validation:** FluentValidation validators enforce valid non-empty room names (1-100 characters, no invalid characters) on all commands and queries.
+
+### B. Concurrency Strategy
+- **Database Constraint Enforced:** Two concurrent transactions competing for the same lowest available seat or attempting a simultaneous double-join trigger MariaDB Error 1062 (Duplicate entry for unique key).
+- **Graceful Retry Resolution:** `ClassroomHandlers.Handle(JoinRoomCommand)` catches `DbUpdateException` for seat/user collisions (`IsSeatOrUserCollision`), detaches the unpersisted candidate entity, and retries the seat allocation loop up to 3 times before raising `ClassroomSeatConflictException` (409 Conflict).
+- **No Partial Entity Leaks:** On conflict, candidate entity is detached/removed from DbContext ChangeTracker, ensuring clean state on retry or failure.
+
+### C. EF Core Schema Changes & Migration
+- **Model Configuration in `AppDbContext`:**
+  - `RoomParticipant.RoomName`: HasMaxLength(100), IsRequired.
+  - `RoomParticipant.Username`: HasMaxLength(100), IsRequired.
+  - Unique composite index: `(RoomName, SeatNumber)`.
+  - Unique composite index: `(RoomName, UserId)`.
+- **Migration:** Generated `20261012121819_AddRoomParticipantConstraints`.
+- **Pending Model Changes:** `dotnet ef migrations has-pending-model-changes` verified: 0 pending changes.
+
+### D. Verification & Test Suite
+- **API Project Build:** `dotnet build MOT.Api/MOT.Api.csproj` succeeded with 0 errors and 0 warnings.
+- **Backend Test Suite:** `dotnet test MOT.Tests/MOT.Tests.csproj` executed: **169/169 passed (100%)**:
+  - 138 existing baseline tests.
+  - 31 new virtual classroom tests in `ClassroomHandlerTests.cs` verifying:
+    - Lowest available seat assignment (0..49).
+    - Idempotent rejoining and state update.
+    - Capacity exhaustion (50 participants -> 409 Conflict).
+    - Concurrent seat collision retry and resolution.
+    - Concurrent duplicate user join retry and resolution.
+    - Retries exhausted under extreme contention -> 409 Conflict.
+    - Stale participant purge (>60s inactivity) and seat reclaiming.
+    - Heartbeat/ping update and missing participant safety.
+    - Participant leave ownership and idempotency.
+    - Participant query stale filtering and ordering.
+    - Unauthenticated request rejection (401 Unauthorized).
+    - Invalid request parameters (FluentValidation 400 Bad Request).
+    - Controller HTTP status mapping (400, 401, 404, 409, 500).
+- **Remote DB Protection:** Strict constraint honored — migrations were not applied to remote production MariaDB database.
+
+
 
 
 

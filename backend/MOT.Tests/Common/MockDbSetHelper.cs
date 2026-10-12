@@ -34,6 +34,22 @@ public static class MockDbSetHelper
 
         mockSet.Setup(d => d.Add(It.IsAny<T>())).Callback<T>(sourceList.Add);
         mockSet.Setup(d => d.Remove(It.IsAny<T>())).Callback<T>(t => sourceList.Remove(t));
+        mockSet.Setup(d => d.RemoveRange(It.IsAny<IEnumerable<T>>()))
+            .Callback<IEnumerable<T>>(items =>
+            {
+                foreach (var item in items.ToList())
+                {
+                    sourceList.Remove(item);
+                }
+            });
+        mockSet.Setup(d => d.RemoveRange(It.IsAny<T[]>()))
+            .Callback<T[]>(items =>
+            {
+                foreach (var item in items)
+                {
+                    sourceList.Remove(item);
+                }
+            });
 
         return mockSet;
     }
