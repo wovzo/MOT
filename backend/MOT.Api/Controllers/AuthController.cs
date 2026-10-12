@@ -135,5 +135,70 @@ namespace MOT.Api.Controllers
                 return StatusCode(500, new { Error = "An unexpected error occurred while changing password." });
             }
         }
+
+        [Authorize]
+        [HttpPut("profile")]
+        [HttpPut("me")]
+        public async Task<IActionResult> UpdateProfile([FromBody] MOT.Application.Users.Commands.UpdateProfileCommand command)
+        {
+            try
+            {
+                var profile = await _mediator.Send(command);
+                return Ok(profile);
+            }
+            catch (FluentValidation.ValidationException ex)
+            {
+                var errors = ex.Errors.Select(e => e.ErrorMessage).ToList();
+                return BadRequest(new { Error = errors.FirstOrDefault() ?? "Validation failed.", Errors = errors });
+            }
+            catch (UserNotFoundException ex)
+            {
+                return NotFound(new { Error = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Unauthorized(new { Error = "User is not authenticated." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An unexpected error occurred while updating user profile.");
+                return StatusCode(500, new { Error = "An unexpected error occurred while updating user profile." });
+            }
+        }
+
+        [Authorize]
+        [HttpDelete("account")]
+        [HttpDelete("me")]
+        public async Task<IActionResult> DeleteAccount([FromBody] MOT.Application.Users.Commands.DeleteAccountCommand command)
+        {
+            try
+            {
+                await _mediator.Send(command);
+                return Ok(new { Message = "Account deleted successfully." });
+            }
+            catch (FluentValidation.ValidationException ex)
+            {
+                var errors = ex.Errors.Select(e => e.ErrorMessage).ToList();
+                return BadRequest(new { Error = errors.FirstOrDefault() ?? "Validation failed.", Errors = errors });
+            }
+            catch (InvalidCredentialsException ex)
+            {
+                return BadRequest(new { Error = ex.Message });
+            }
+            catch (UserNotFoundException ex)
+            {
+                return NotFound(new { Error = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Unauthorized(new { Error = "User is not authenticated." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An unexpected error occurred while deleting account.");
+                return StatusCode(500, new { Error = "An unexpected error occurred while deleting account." });
+            }
+        }
     }
 }
+

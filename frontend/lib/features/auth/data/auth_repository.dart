@@ -68,10 +68,42 @@ class AuthRepository {
     }
   }
 
+  Future<UserProfile> updateProfile(String displayName) async {
+    try {
+      final response = await _networkClient.dio.put('auth/profile', data: {
+        'displayName': displayName,
+      });
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        return UserProfile.fromJson(data);
+      } else if (data is Map) {
+        return UserProfile.fromJson(Map<String, dynamic>.from(data));
+      }
+      throw Exception('Invalid profile response format');
+    } on DioException catch (e) {
+      throw Exception(_extractErrorMessage(e, 'Failed to update profile'));
+    }
+  }
+
+  Future<void> deleteAccount(String password) async {
+    try {
+      await _networkClient.dio.delete('auth/account', data: {
+        'password': password,
+      });
+      // Clear token and local credentials only after successful deletion confirmation
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('jwt_token');
+    } on DioException catch (e) {
+      // On failure, local credentials and token are preserved
+      throw Exception(_extractErrorMessage(e, 'Failed to delete account'));
+    }
+  }
+
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('jwt_token');
   }
+
 
   Future<bool> isAuthenticated() async {
     final prefs = await SharedPreferences.getInstance();
@@ -79,7 +111,13 @@ class AuthRepository {
   }
 
   String _extractErrorMessage(DioException e, String defaultMessage) {
+    if (e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.sendTimeout ||
+        e.type == DioExceptionType.receiveTimeout) {
+      return 'Network timeout. Please check your connection and retry.';
+    }
     final data = e.response?.data;
+
     dynamic mapData = data;
     if (data is String) {
       try {

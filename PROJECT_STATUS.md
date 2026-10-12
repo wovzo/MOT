@@ -540,6 +540,93 @@ A targeted verification of three specific risk areas was conducted against the a
 - **EF Model Snapshot Check:** 0 pending model changes.
 - **Remote DB Protection:** No migrations were applied to the remote production database.
 
+## Phase 4: Profile and Account Management
+
+**Status: VERIFIED & COMPLETE**
+
+Profile retrieval and editing, authenticated password change regression hardening, and safe account deletion with relational cascade handling were implemented across the ASP.NET Core backend and Flutter client.
+
+### 1. Database Relationship & Foreign Key Audit
+- **MariaDB Schema Inspection:** Read-only inspection of `information_schema.REFERENTIAL_CONSTRAINTS` on live MariaDB 10.11 confirmed foreign keys and `ON DELETE` rules:
+  - `Tasks`: `FK_Tasks_Users_UserId -> Users(Id)` (`ON DELETE CASCADE`)
+  - `Habits`: `FK_Habits_Users_UserId -> Users(Id)` (`ON DELETE CASCADE`)
+    - `HabitCompletions`: `FK_HabitCompletions_Habits_HabitId -> Habits(Id)` (`ON DELETE CASCADE`)
+  - `StudySessions`: `FK_StudySessions_Users_UserId -> Users(Id)` (`ON DELETE CASCADE`)
+  - `RoomParticipants`: Stores `UserId` (`char(36)`) without a formal database foreign key constraint.
+- **Real MariaDB Cascade Verification:** Executed a live test against MariaDB 10.11 using a disposable test user with associated rows across `Tasks`, `Habits`, `HabitCompletions`, `StudySessions`, and `RoomParticipants`. Confirmed that executing an atomic transaction removing the user's `RoomParticipants` and `Users` record resulted in clean cascade deletion of all child records across all 6 tables with **0 foreign key violations** and **0 orphaned records**.
+
+### 2. Profile Retrieval and Editing
+- **`UpdateProfileCommand` & Handler:** Created `MOT.Application/Users/Commands/UpdateProfileCommand.cs`.
+- **Identity Derivation:** The authenticated user GUID is resolved strictly via `ICurrentUserService.UserId`. No client-supplied user ID is accepted.
+- **Field Whitelist & Tampering Protection:** Only `DisplayName` is editable (`1 <= Length <= 100`, trimmed). Protected fields (`Id`, `Email`, `PasswordHash`, `CreatedAt`, `XP`, `Level`, `CurrentStreak`, role/claims) cannot be modified.
+- **Focus Total Calculation:** Preserved calculation of `totalFocusMinutes` via `_context.StudySessions.Where(s => s.UserId == userId && s.EndTime != null).SumAsync(s => s.DurationMinutes)`.
+- **Validation:** Added `UpdateProfileCommandValidator` using FluentValidation (rejects empty strings, whitespace-only, and strings > 100 characters).
+- **Endpoints:** Exposed `PUT /api/auth/profile` and `PUT /api/auth/me` on `AuthController` returning HTTP 200 with updated `UserProfileDto`.
+
+### 3. Password Change Verification & Regression Hardening
+- **Implementation Audit:** Verified existing `POST /api/auth/change-password` from Phase 1.
+- **Verification:** Current password verified against stored PBKDF2 hash using `IPasswordHasher.VerifyPassword`. New password validated for minimum length of 6 characters and difference from current password.
+- **Security Invariants:** Password hashes are never returned to clients or logged. Unsuccessful attempts (wrong password, validation errors) preserve the stored password hash completely intact.
+
+### 4. Account Deletion
+- **Endpoints:** Exposed `DELETE /api/auth/account` and `DELETE /api/auth/me` on `AuthController`.
+- **Authentication & Re-authentication:** Scoped strictly to `ICurrentUserService.UserId`. Requires current password confirmation via `DeleteAccountCommand`.
+- **Atomic Cleanup:** Verifies current password via `IPasswordHasher.VerifyPassword`. If valid, purges active `RoomParticipants` belonging to the user and removes the user record from `_context.Users`, triggering database-level relational cascade deletion of all user tasks, habits, habit completions, and study sessions in MariaDB.
+- **Failure Safety:** If the password is incorrect, throws `InvalidCredentialsException` and aborts immediately without removing any records.
+
+### 5. Flutter Client Integration
+- **`AuthRepository` Updates:** Added `updateProfile(String displayName)` and `deleteAccount(String password)` in `frontend/lib/features/auth/data/auth_repository.dart`.
+- **Token & State Handling:** Local JWT token is cleared from `SharedPreferences` only after confirmed successful server deletion. On failed deletion, local credentials and tokens are preserved and error messages are extracted cleanly.
+
+### 6. Build and Test Summary
+- **Backend API Build:** `dotnet build MOT.Api/MOT.Api.csproj` -> **0 Errors, 0 Warnings**.
+- **Backend Test Suite:** `dotnet test MOT.Tests/MOT.Tests.csproj` -> **231/231 passed (100%)** (added JWT and post-deletion handler verification tests).
+- **Frontend Test Suite:** `flutter test` -> **19/19 passed (100%)** (added account deletion, timeout, and cleanup tests).
+- **EF Model Snapshot Check:** `dotnet ef migrations has-pending-model-changes` -> **0 pending model changes**.
+- **Remote DB Protection:** Strict constraint honored — no migrations applied to remote production database.
+
+## Phase 4 Final Safety Audit Before Phase 5
+
+**Status: VERIFIED & CONFIRMED**
+
+A targeted pre-Phase 5 audit was performed covering JWT invalidation, Flutter client deletion & cleanup flows, and database migration deployment status.
+
+### 1. Check 1 — JWT Invalidation After Account Deletion
+- **Current Behavior:** ASP.NET Core `JwtBearerHandler` validates token signatures and expiration (`DateTime.UtcNow.AddDays(7)`) statelessly in memory. The middleware does not check whether the user entity currently exists in MariaDB.
+- **Post-Deletion Handler Protections:**
+  - When an account is deleted, the user record is removed from `Users`.
+  - All account/profile handlers (`GetCurrentUserQueryHandler`, `UpdateProfileCommandHandler`, `ChangePasswordCommandHandler`, `DeleteAccountCommandHandler`) query `Users` and throw `UserNotFoundException` (HTTP 404).
+  - All write operations referencing `UserId` (`CreateTaskCommandHandler`, `StartStudySessionCommandHandler`) fail due to database foreign-key constraints (`FK_Tasks_Users_UserId`, `FK_StudySessions_Users_UserId`).
+- **Architectural Trade-Off & Evaluation:**
+  - Adding `OnTokenValidated` database validation on every request would query MariaDB (`SELECT 1 FROM Users WHERE Id = @userId`) for every API call, introducing significant latency and connection exhaustion on high-frequency virtual classroom heartbeats (50 participants pinging every few seconds) against the remote shared MariaDB instance without a caching layer.
+  - The recommended production pattern (documented for future hardening) is introducing short-lived access tokens (15–60 min) with refresh tokens or a distributed cache token-revocation blacklist.
+  - The middleware was intentionally left stateless to protect database stability, and 2 new automated tests were added verifying that all user-specific handlers reject deleted users with `UserNotFoundException`.
+
+### 2. Check 2 — Flutter Account Deletion & Local Data Cleanup
+- **Success Flow:** Verified in `SettingsScreen` and `AuthRepository`. Deletion calls `DELETE /api/auth/account` with the confirmed password. Only upon confirmed HTTP 200 success does the repository remove `jwt_token` from `SharedPreferences`. The presentation layer invalidates `userProfileProvider`, resets `authStateProvider` to `false`, displays a success notification, and navigates cleanly to `LoginScreen` via `pushAndRemoveUntil`.
+- **Failure Flow:** On invalid password (HTTP 400) or network timeout, `jwt_token` is strictly preserved in `SharedPreferences`, authenticated state remains active, and error feedback is presented to the user without falsely clearing local credentials.
+- **Network Timeouts:** Hardened `_extractErrorMessage` in `AuthRepository` to explicitly capture connection/send/receive timeouts and surface an actionable error message ("Network timeout. Please check your connection and retry.").
+- **Tests Added:** Added 5 new tests in `frontend/test/auth_repository_and_cleanup_test.dart` covering success token removal, wrong-password credential retention, timeout handling, profile update mapping, and Riverpod provider cache invalidation.
+
+### 3. Check 3 — Database Migration & Remote Deployment Status
+- **Empirical MariaDB Audit:** Read-only query against `mindontrack-31353797c1.__EFMigrationsHistory` revealed:
+  - Applied remotely:
+    1. `20260909161703_AddHabits` (v8.0.4)
+    2. `20261002081502_AddStudySessions` (v8.0.4)
+    3. `20261006061237_AddRoomParticipants` (v8.0.4)
+    4. `20261006064106_AddSingleActiveStudySessionConstraint` (v8.0.4)
+  - Pending remote deployment:
+    1. `20261012110919_FixStudySessionActiveUserIdColumn`
+    2. `20261012121819_AddRoomParticipantConstraints`
+    3. `20261012175608_AddUniqueIndexToHabitCompletions`
+- **Pre-Flight Migration Risk Inspection:** Ran read-only queries against live tables for the 3 pending migrations:
+  - `StudySessions`: 0 duplicate active sessions found; safe to apply `FixStudySessionActiveUserIdColumn`.
+  - `RoomParticipants`: 0 duplicate `(RoomName, SeatNumber)` or `(RoomName, UserId)` entries found; 0 strings exceed 100 characters; safe to apply `AddRoomParticipantConstraints`.
+  - `HabitCompletions`: 0 duplicate `(HabitId, Date)` entries found; safe to apply `AddUniqueIndexToHabitCompletions`.
+- **Remote DB Protection:** Strict constraint honored — no migrations were executed against the remote database.
+
+
+
 
 
 
