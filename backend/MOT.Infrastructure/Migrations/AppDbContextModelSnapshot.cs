@@ -138,9 +138,7 @@ namespace MOT.Infrastructure.Migrations
                         .HasColumnType("char(36)");
 
                     b.Property<Guid?>("ActiveUserId")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("char(36)")
-                        .HasComputedColumnSql("CASE WHEN `IsCompleted` = 0 AND `EndTime` IS NULL THEN `UserId` ELSE NULL END", true);
+                        .HasColumnType("char(36)");
 
                     b.Property<int>("DurationMinutes")
                         .HasColumnType("int");

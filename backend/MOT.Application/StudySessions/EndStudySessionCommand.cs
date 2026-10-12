@@ -41,6 +41,7 @@ namespace MOT.Application.StudySessions
                 session.EndTime = DateTime.UtcNow;
                 session.DurationMinutes = (int)(session.EndTime.Value - session.StartTime).TotalMinutes;
                 session.IsCompleted = true;
+                session.ActiveUserId = null;
                 
                 await _context.SaveChangesAsync(cancellationToken);
             }

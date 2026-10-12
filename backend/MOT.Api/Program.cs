@@ -65,7 +65,7 @@ var connectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING"
                        ?? builder.Configuration.GetConnectionString("DefaultConnection") 
                        ?? throw new InvalidOperationException("Connection string not found.");
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
+    options.UseMySql(connectionString, ServerVersion.Parse("10.11.18-mariadb")));
 builder.Services.AddScoped<MOT.Application.Common.Interfaces.IAppDbContext>(provider => provider.GetRequiredService<AppDbContext>());
 
 builder.Services.AddScoped<IAuthRepository, AuthRepository>();

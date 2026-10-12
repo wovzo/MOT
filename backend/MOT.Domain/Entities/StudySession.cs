@@ -14,5 +14,6 @@ namespace MOT.Domain.Entities
         
         public int DurationMinutes { get; set; } = 0;
         public bool IsCompleted { get; set; } = false;
+        public Guid? ActiveUserId { get; set; }
     }
 }

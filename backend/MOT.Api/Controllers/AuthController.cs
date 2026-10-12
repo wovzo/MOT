@@ -94,22 +94,45 @@ namespace MOT.Api.Controllers
             }
         }
 
+#pragma warning disable CS0618
         [HttpPost("reset-password")]
-        public async Task<IActionResult> ResetPassword([FromBody] MOT.Application.Users.Commands.ResetPasswordCommand command)
+        public IActionResult ResetPassword([FromBody] MOT.Application.Users.Commands.ResetPasswordCommand command)
+#pragma warning restore CS0618
+        {
+            // For security, unauthenticated password reset by email is disabled.
+            // Returning a uniform error prevents account enumeration and prevents unauthorized password overrides.
+            return BadRequest(new
+            {
+                Error = "Self-service password recovery is currently disabled. Please contact support or use authenticated password change."
+            });
+        }
+
+        [Authorize]
+        [HttpPost("change-password")]
+        public async Task<IActionResult> ChangePassword([FromBody] MOT.Application.Users.Commands.ChangePasswordCommand command)
         {
             try
             {
-                var success = await _mediator.Send(command);
-                if (!success)
-                {
-                    return NotFound(new { Error = "User with that email not found." });
-                }
-                return Ok(new { Message = "Password reset successfully." });
+                await _mediator.Send(command);
+                return Ok(new { Message = "Password changed successfully." });
+            }
+            catch (FluentValidation.ValidationException ex)
+            {
+                var errors = ex.Errors.Select(e => e.ErrorMessage).ToList();
+                return BadRequest(new { Error = errors.FirstOrDefault() ?? "Validation failed.", Errors = errors });
+            }
+            catch (InvalidCredentialsException ex)
+            {
+                return BadRequest(new { Error = ex.Message });
+            }
+            catch (UserNotFoundException ex)
+            {
+                return NotFound(new { Error = ex.Message });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "An unexpected error occurred during password reset.");
-                return StatusCode(500, new { Error = "An unexpected error occurred during password reset." });
+                _logger.LogError(ex, "An unexpected error occurred while changing password.");
+                return StatusCode(500, new { Error = "An unexpected error occurred while changing password." });
             }
         }
     }

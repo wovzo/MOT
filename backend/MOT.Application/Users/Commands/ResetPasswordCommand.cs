@@ -1,40 +1,24 @@
-using MediatR;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
-using MOT.Application.Common.Interfaces;
-using MOT.Domain.Interfaces;
-using Microsoft.EntityFrameworkCore;
-using System;
+using MediatR;
 
 namespace MOT.Application.Users.Commands;
 
+[Obsolete("Unauthenticated password reset by email is disabled. Use authenticated ChangePasswordCommand or a secure token recovery flow.")]
 public class ResetPasswordCommand : IRequest<bool>
 {
     public string Email { get; set; } = string.Empty;
     public string NewPassword { get; set; } = string.Empty;
 }
 
+[Obsolete("Unauthenticated password reset by email is disabled.")]
 public class ResetPasswordCommandHandler : IRequestHandler<ResetPasswordCommand, bool>
 {
-    private readonly IAppDbContext _context;
-    private readonly IPasswordHasher _passwordHasher;
-
-    public ResetPasswordCommandHandler(IAppDbContext context, IPasswordHasher passwordHasher)
+    public Task<bool> Handle(ResetPasswordCommand request, CancellationToken cancellationToken)
     {
-        _context = context;
-        _passwordHasher = passwordHasher;
-    }
-
-    public async Task<bool> Handle(ResetPasswordCommand request, CancellationToken cancellationToken)
-    {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email, cancellationToken);
-        if (user == null)
-        {
-            return false; // User not found
-        }
-
-        user.PasswordHash = _passwordHasher.HashPassword(request.NewPassword);
-        await _context.SaveChangesAsync(cancellationToken);
-        return true;
+        // For security, unauthenticated password reset by email is disabled.
+        // It never queries or modifies user accounts.
+        return Task.FromResult(false);
     }
 }

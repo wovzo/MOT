@@ -11,12 +11,15 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using MOT.Api.Controllers;
 using MOT.Application.Common.Exceptions;
+using MOT.Application.Common.Interfaces;
 using MOT.Application.DTOs;
 using MOT.Application.Handlers;
+using MOT.Application.Users.Commands;
 using MOT.Application.Validators;
 using MOT.Domain.Entities;
 using MOT.Domain.Interfaces;
 using MOT.Infrastructure.Authentication;
+using MOT.Tests.Common;
 using Xunit;
 
 namespace MOT.Tests.Authentication;
@@ -301,5 +304,178 @@ public class AuthenticationTests
         var errorResult = await controller.Register(new RegisterRequest("user@test.com", "Password123!", "User"));
         var statusResult = errorResult.Should().BeOfType<ObjectResult>().Subject;
         statusResult.StatusCode.Should().Be(500);
+    }
+
+    // 14. Insecure reset-password endpoint returns BadRequest with disabled message and never invokes mediator
+    [Fact]
+    public void ResetPassword_Endpoint_ReturnsBadRequestWithDisabledMessage_AndDoesNotUpdatePassword()
+    {
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<AuthController>>();
+        var controller = new AuthController(mediatorMock.Object, loggerMock.Object);
+
+#pragma warning disable CS0618
+        var command = new ResetPasswordCommand { Email = "victim@example.com", NewPassword = "NewHackedPassword123!" };
+        var result = controller.ResetPassword(command);
+#pragma warning restore CS0618
+
+        var badRequestResult = result.Should().BeOfType<BadRequestObjectResult>().Subject;
+        badRequestResult.StatusCode.Should().Be(400);
+
+        // Verify mediator is never called to process unauthenticated password resets
+#pragma warning disable CS0618
+        mediatorMock.Verify(m => m.Send(It.IsAny<ResetPasswordCommand>(), It.IsAny<CancellationToken>()), Times.Never);
+#pragma warning restore CS0618
+    }
+
+    // 15. ChangePassword fails when unauthenticated
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not-a-guid")]
+    public async Task ChangePassword_WhenUnauthenticated_ThrowsUnauthorizedAccessException(string? invalidUserId)
+    {
+        var dbContextMock = new Mock<IAppDbContext>();
+        var currentUserServiceMock = new Mock<ICurrentUserService>();
+        currentUserServiceMock.Setup(s => s.UserId).Returns(invalidUserId);
+
+        var handler = new ChangePasswordCommandHandler(dbContextMock.Object, currentUserServiceMock.Object, _passwordHasher);
+        var command = new ChangePasswordCommand { CurrentPassword = "OldPassword123!", NewPassword = "NewPassword123!" };
+
+        var act = () => handler.Handle(command, CancellationToken.None);
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    // 16. ChangePassword fails when user not found
+    [Fact]
+    public async Task ChangePassword_WhenUserNotFound_ThrowsUserNotFoundException()
+    {
+        var userId = Guid.NewGuid();
+        var users = new List<User>();
+        var mockDbSet = MockDbSetHelper.CreateMockDbSet(users);
+
+        var dbContextMock = new Mock<IAppDbContext>();
+        dbContextMock.Setup(c => c.Users).Returns(mockDbSet.Object);
+
+        var currentUserServiceMock = new Mock<ICurrentUserService>();
+        currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var handler = new ChangePasswordCommandHandler(dbContextMock.Object, currentUserServiceMock.Object, _passwordHasher);
+        var command = new ChangePasswordCommand { CurrentPassword = "OldPassword123!", NewPassword = "NewPassword123!" };
+
+        var act = () => handler.Handle(command, CancellationToken.None);
+        await act.Should().ThrowAsync<UserNotFoundException>();
+    }
+
+    // 17. ChangePassword fails when current password is incorrect
+    [Fact]
+    public async Task ChangePassword_WhenCurrentPasswordIncorrect_ThrowsInvalidCredentialsException()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User
+        {
+            Id = userId,
+            Email = "user@example.com",
+            PasswordHash = _passwordHasher.HashPassword("RealCurrentPassword123!")
+        };
+        var users = new List<User> { user };
+        var mockDbSet = MockDbSetHelper.CreateMockDbSet(users);
+
+        var dbContextMock = new Mock<IAppDbContext>();
+        dbContextMock.Setup(c => c.Users).Returns(mockDbSet.Object);
+
+        var currentUserServiceMock = new Mock<ICurrentUserService>();
+        currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var handler = new ChangePasswordCommandHandler(dbContextMock.Object, currentUserServiceMock.Object, _passwordHasher);
+        var command = new ChangePasswordCommand { CurrentPassword = "WrongPassword123!", NewPassword = "NewPassword123!" };
+
+        var act = () => handler.Handle(command, CancellationToken.None);
+        var ex = await act.Should().ThrowAsync<InvalidCredentialsException>();
+        ex.WithMessage("Current password is incorrect.");
+
+        // Password hash should not have changed
+        _passwordHasher.VerifyPassword("RealCurrentPassword123!", user.PasswordHash).Should().BeTrue();
+    }
+
+    // 18. ChangePassword succeeds when valid and rotates password hash
+    [Fact]
+    public async Task ChangePassword_WhenValid_UpdatesPasswordHashAndSucceeds()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User
+        {
+            Id = userId,
+            Email = "user@example.com",
+            PasswordHash = _passwordHasher.HashPassword("OldValidPassword123!")
+        };
+        var users = new List<User> { user };
+        var mockDbSet = MockDbSetHelper.CreateMockDbSet(users);
+
+        var dbContextMock = new Mock<IAppDbContext>();
+        dbContextMock.Setup(c => c.Users).Returns(mockDbSet.Object);
+        dbContextMock.Setup(c => c.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+
+        var currentUserServiceMock = new Mock<ICurrentUserService>();
+        currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var handler = new ChangePasswordCommandHandler(dbContextMock.Object, currentUserServiceMock.Object, _passwordHasher);
+        var command = new ChangePasswordCommand { CurrentPassword = "OldValidPassword123!", NewPassword = "BrandNewPassword123!" };
+
+        var result = await handler.Handle(command, CancellationToken.None);
+        result.Should().BeTrue();
+
+        // Old password must fail, new password must verify
+        _passwordHasher.VerifyPassword("OldValidPassword123!", user.PasswordHash).Should().BeFalse();
+        _passwordHasher.VerifyPassword("BrandNewPassword123!", user.PasswordHash).Should().BeTrue();
+        dbContextMock.Verify(c => c.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // 19. ChangePassword validator enforces required rules
+    [Theory]
+    [InlineData("", "NewPassword123!", false)]
+    [InlineData("CurrentPassword123!", "", false)]
+    [InlineData("CurrentPassword123!", "12345", false)]
+    [InlineData("SamePassword123!", "SamePassword123!", false)]
+    [InlineData("CurrentPassword123!", "NewPassword123!", true)]
+    public void ChangePassword_Validator_EnforcesRules(string currentPassword, string newPassword, bool shouldBeValid)
+    {
+        var validator = new ChangePasswordCommandValidator();
+        var command = new ChangePasswordCommand { CurrentPassword = currentPassword, NewPassword = newPassword };
+        var result = validator.Validate(command);
+        result.IsValid.Should().Be(shouldBeValid);
+    }
+
+    // 20. AuthController maps ChangePassword exceptions to appropriate HTTP semantics
+    [Fact]
+    public async Task AuthController_ChangePassword_MapsExceptionsToStatusCodes()
+    {
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<AuthController>>();
+        var controller = new AuthController(mediatorMock.Object, loggerMock.Object);
+
+        // Success -> 200 OK
+        mediatorMock.Setup(m => m.Send(It.IsAny<ChangePasswordCommand>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var okResult = await controller.ChangePassword(new ChangePasswordCommand { CurrentPassword = "old", NewPassword = "new" });
+        okResult.Should().BeOfType<OkObjectResult>();
+
+        // ValidationException -> 400 Bad Request
+        mediatorMock.Setup(m => m.Send(It.IsAny<ChangePasswordCommand>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ValidationException(new[] { new ValidationFailure("NewPassword", "Too short") }));
+        var valResult = await controller.ChangePassword(new ChangePasswordCommand { CurrentPassword = "old", NewPassword = "new" });
+        valResult.Should().BeOfType<BadRequestObjectResult>();
+
+        // InvalidCredentialsException -> 400 Bad Request
+        mediatorMock.Setup(m => m.Send(It.IsAny<ChangePasswordCommand>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidCredentialsException("Current password is incorrect."));
+        var credsResult = await controller.ChangePassword(new ChangePasswordCommand { CurrentPassword = "wrong", NewPassword = "new" });
+        credsResult.Should().BeOfType<BadRequestObjectResult>();
+
+        // UserNotFoundException -> 404 Not Found
+        mediatorMock.Setup(m => m.Send(It.IsAny<ChangePasswordCommand>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new UserNotFoundException(Guid.NewGuid()));
+        var notFoundResult = await controller.ChangePassword(new ChangePasswordCommand { CurrentPassword = "old", NewPassword = "new" });
+        notFoundResult.Should().BeOfType<NotFoundObjectResult>();
     }
 }

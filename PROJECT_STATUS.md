@@ -367,5 +367,29 @@ Full-stack concurrency hardening for single active study session per authenticat
 - Global Dio 401 interceptor.
 - Pre-existing Flutter analyzer infos in other modules.
 
+## Phase 1 — Security and Schema Drift Remediation
+
+**Status: IMPLEMENTATION & VERIFICATION COMPLETE**
+
+Phase 1 addressed the unauthenticated password-reset vulnerability and reconciled the EF Core model drift with the MariaDB database schema.
+
+### A. Password Security Remediation
+- **Disabled Insecure Password Reset:** Removed unauthenticated password overrides in `ResetPasswordCommandHandler` and `AuthController.ResetPassword`. Endpoint returns a uniform HTTP 400 Bad Request `{ "Error": "Self-service password recovery is currently disabled. Please contact support or use authenticated password change." }` without leaking user existence.
+- **Implemented Authenticated Change Password:** Added `ChangePasswordCommand` (`POST /api/auth/change-password`) with `[Authorize]`. Derives identity strictly from `ICurrentUserService.UserId`, verifies the current password hash via `IPasswordHasher.VerifyPassword`, validates the new password (min 6 characters, must differ from current password), and persists the new PBKDF2 password hash.
+- **Exceptions & Status Codes:** Mapped `InvalidCredentialsException` to HTTP 400, `ValidationException` to HTTP 400, `UserNotFoundException` to HTTP 404, and unauthenticated requests to HTTP 401.
+
+### B. EF Core and MariaDB Schema Drift Resolution
+- **Model Realignment:** Replaced the virtual/computed column definition in `AppDbContext.cs` with an explicit nullable property `public Guid? ActiveUserId { get; set; }` on `StudySession` with a `UNIQUE` index.
+- **Database Engine Concurrency:** Validated empirically on MariaDB 10.11 that a nullable column with a `UNIQUE` index allows multiple `NULL` values for completed sessions (`IsCompleted = 1, ActiveUserId = null`) while strictly enforcing uniqueness for active sessions (`ActiveUserId = UserId`). Concurrent duplicate active sessions are rejected with MySQL Error 1062 / `DbUpdateException`.
+- **Application Lifecycle:** Updated `StartStudySessionCommandHandler` to set `ActiveUserId = userId` and `EndStudySessionCommandHandler` to clear `ActiveUserId = null`.
+- **Corrective Migration:** Generated idempotent migration `20261012110919_FixStudySessionActiveUserIdColumn` with safe SQL checks for MariaDB 10.11. Model snapshot matches schema with 0 pending model changes.
+
+### C. Verification
+- **Backend Build:** 0 errors, 0 warnings (`dotnet build MOT.Api/MOT.Api.csproj`).
+- **Backend Tests:** 136/136 tests passed (123 baseline + 13 new regression and feature tests in `AuthenticationTests.cs` and `StudySessionHandlerTests.cs`).
+- **EF Pending Changes:** `dotnet ef migrations has-pending-model-changes` verified: 0 pending changes.
+- **Database Remote Protection:** Strict constraint honored — migrations were tested on mock/temporary tables without running `database update` against production.
+
+
 
 

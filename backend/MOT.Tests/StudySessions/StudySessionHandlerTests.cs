@@ -57,6 +57,7 @@ public class StudySessionHandlerTests
         _sessions.Should().HaveCount(1);
         var createdSession = _sessions.Single();
         createdSession.UserId.Should().Be(userId);
+        createdSession.ActiveUserId.Should().Be(userId);
         createdSession.Title.Should().Be("Deep Work Focus");
         createdSession.IsCompleted.Should().BeFalse();
 
@@ -115,6 +116,7 @@ public class StudySessionHandlerTests
         result.DurationMinutes.Should().BeInRange(44, 46);
 
         session.IsCompleted.Should().BeTrue();
+        session.ActiveUserId.Should().BeNull();
         session.EndTime.Should().NotBeNull();
         session.DurationMinutes.Should().BeInRange(44, 46);
 

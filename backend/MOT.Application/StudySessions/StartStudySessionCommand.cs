@@ -42,6 +42,7 @@ namespace MOT.Application.StudySessions
             var session = new StudySession
             {
                 UserId = userId,
+                ActiveUserId = userId,
                 Title = request.Title,
                 StartTime = DateTime.UtcNow,
                 IsCompleted = false

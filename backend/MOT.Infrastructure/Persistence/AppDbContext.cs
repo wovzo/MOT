@@ -44,9 +44,10 @@ public class AppDbContext : DbContext, IAppDbContext
                   .IsRequired();
             entity.HasIndex(e => e.UserId);
 
-            entity.Property<Guid?>("ActiveUserId")
-                  .HasComputedColumnSql("CASE WHEN `IsCompleted` = 0 AND `EndTime` IS NULL THEN `UserId` ELSE NULL END", stored: true);
-            entity.HasIndex("ActiveUserId")
+            entity.Property(e => e.ActiveUserId)
+                  .HasColumnType("char(36)")
+                  .IsRequired(false);
+            entity.HasIndex(e => e.ActiveUserId)
                   .IsUnique();
         });
     }

@@ -6,4 +6,9 @@ public class InvalidCredentialsException : Exception
         : base("Invalid email or password.")
     {
     }
+
+    public InvalidCredentialsException(string message)
+        : base(message)
+    {
+    }
 }
