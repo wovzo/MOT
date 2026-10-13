@@ -47,9 +47,9 @@ class _HabitDashboardScreenState extends State<HabitDashboardScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (context) => Padding(
+      builder: (sheetContext) => Padding(
         padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
+          bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
           left: 16,
           right: 16,
           top: 16,
@@ -73,7 +73,7 @@ class _HabitDashboardScreenState extends State<HabitDashboardScreen> {
             ElevatedButton(
               onPressed: () async {
                 if (titleController.text.trim().isEmpty) return;
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 
                 try {
                   await _repository.createHabit(titleController.text.trim(), descController.text.trim());
@@ -113,7 +113,7 @@ class _HabitDashboardScreenState extends State<HabitDashboardScreen> {
           ? const Center(child: Text('No habits yet. Start a new routine today!'))
           : ListView.builder(
               itemCount: _habits.length,
-              itemBuilder: (context, index) {
+              itemBuilder: (itemContext, index) {
                 final habit = _habits[index];
                 return Card(
                   margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -125,9 +125,11 @@ class _HabitDashboardScreenState extends State<HabitDashboardScreen> {
                           await _repository.toggleHabit(habit.id);
                           _loadHabits();
                         } catch (e) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Failed to update habit')),
-                          );
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Failed to update habit')),
+                            );
+                          }
                         }
                       },
                       child: Container(

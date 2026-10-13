@@ -30,8 +30,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         );
       }
     } catch (e) {
-      final message = e.toString().replaceFirst('Exception: ', '');
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      if (mounted) {
+        final message = e.toString().replaceFirst('Exception: ', '');
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

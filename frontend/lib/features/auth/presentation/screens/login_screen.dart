@@ -30,10 +30,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         );
       }
     } catch (e) {
-      final message = e.toString().replaceFirst('Exception: ', '');
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      if (mounted) {
+        final message = e.toString().replaceFirst('Exception: ', '');
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -43,7 +47,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     
     await showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF1E1A3C),
         title: const Text('Reset Password', style: TextStyle(color: Colors.white)),
         content: Column(
@@ -58,7 +62,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
           ),
           ElevatedButton(
@@ -67,8 +71,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               try {
                 final repo = ref.read(authRepositoryProvider);
                 await repo.resetPassword(emailController.text, newPasswordController.text);
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                }
                 if (mounted) {
-                  Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password reset successfully!')));
                 }
               } catch (e) {

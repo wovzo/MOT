@@ -1279,3 +1279,278 @@ A complete Flutter UI integration was implemented for the Gamification subsystem
 - **EF Model Snapshot Check:** `dotnet ef migrations has-pending-model-changes` -> **0 pending model changes**.
 - **Remote DB Protection:** Strict constraint honored — remote database was never connected to or modified; no migrations applied.
 
+---
+
+## Phase 7 — Comprehensive Release-Readiness Audit
+
+**Audit Status: COMPLETED**  
+**Release Readiness Category: Ready for controlled staging deployment** (Blocked from direct production deployment pending pre-migration database remediation and staging sign-off)
+
+---
+
+### 1. Audit Scope and Baseline Metrics
+
+A thorough, end-to-end release-readiness audit was performed across the entire Mind On Track (MOT) repository covering Phases 0 through 6.5.
+
+- **Technology Stack Preserved:**
+  - Frontend: Flutter (Dart 3.13 / Flutter 3.47) with Flutter Riverpod
+  - Backend: ASP.NET Core (.NET 8.0), EF Core 8.0, Pomelo MySQL/MariaDB provider (target MariaDB 10.11)
+  - Architecture: Clean Architecture, CQRS/MediatR, FluentValidation, Repository pattern
+- **Remote Database Protection Invariant:**
+  - Zero connections, queries, schema mutations, or migration commands executed against the remote MariaDB database.
+  - Local EF Core model snapshot remains in 100% synchronization (`0 pending model changes`).
+- **Initial Baseline Verification (Prior to Fixes):**
+  - Backend Build: `dotnet build backend/MOT.Api/MOT.Api.csproj` -> 0 Errors, 0 Warnings
+  - Backend Test Suite: `dotnet test backend/MOT.Tests/MOT.Tests.csproj` -> 462/462 Passed (100%)
+  - Frontend Test Suite: `flutter test` -> 52/52 Passed (100%)
+  - Frontend Static Analysis: 15 issues (6 async context lint warnings across auth/habit screens, 9 Flutter 3.47 deprecation infos)
+  - Working Tree Status: Clean on branch `main`
+
+---
+
+### 2. Verified Defect Fixes Applied
+
+During the audit, 3 verified defects were identified, fixed with minimal targeted edits, and regression-tested:
+
+1. **Incomplete Provider Cache Invalidation on Account Deletion (`SettingsScreen`):**
+   - *Defect:* `SettingsScreen._showDeleteAccountDialog` invalidated `userProfileProvider` and reset `authStateProvider`, but omitted `gamificationSummaryProvider`, `achievementsProvider`, and `xpHistoryProvider`. If an account was deleted and a new user logged in during the same application run, stale XP, level progress, and achievement data could remain in memory.
+   - *Fix:* Added imports and explicit invalidations for `gamificationSummaryProvider`, `achievementsProvider`, and `xpHistoryProvider` in `settings_screen.dart`.
+   - *Regression Test:* Added multi-provider invalidation verification to `frontend/test/auth_repository_and_cleanup_test.dart`.
+
+2. **Unshielded BuildContext across Async Gaps in Auth Screens:**
+   - *Defect:* In `login_screen.dart` and `register_screen.dart`, network failure handlers invoked `ScaffoldMessenger.of(context)` and `setState` without checking `if (mounted)`. If the screen unmounted while the network request was in flight, this triggered unhandled Flutter runtime exceptions.
+   - *Fix:* Added `if (mounted)` guards to all catch and finally blocks in `login_screen.dart` and `register_screen.dart`, and used `dialogContext` inside dialog builder.
+
+3. **Shadowed Context in Habit Dashboard Sheet & List Builder:**
+   - *Defect:* In `habit_dashboard_screen.dart`, the `showModalBottomSheet` builder and `ListView.builder` used shadowed `context` variables, causing `ScaffoldMessenger.of(context)` calls after async gaps to reference unmounted dialog/item contexts.
+   - *Fix:* Renamed shadowed contexts to `sheetContext` and `itemContext`, and properly guarded `ScaffoldMessenger` with `if (mounted)`.
+
+---
+
+### 3. Backend Security & Authorization Audit
+
+- **Authentication & Endpoint Protection:**
+  - Controller-level `[Authorize]` attributes verified across `TasksController`, `HabitsController`, `StudySessionsController`, `AnalyticsController`, `GamificationController`, and `ClassroomsController`.
+  - Only anonymous endpoints in the entire API are `POST api/auth/register` and `POST api/auth/login`.
+- **Identity Isolation & User Scoping:**
+  - All user-specific queries, commands, and operations resolve user ID exclusively from `ICurrentUserService.UserId` (extracted from the authenticated JWT claims).
+  - Client-supplied IDs in query strings or request bodies cannot override `UserId`.
+  - All database entity queries filter by `UserId == userId` (e.g. `t.Id == request.Id && t.UserId == userId`). Cross-user access returns `TaskNotFoundException`, `HabitNotFoundException`, or `StudySessionNotFoundException` (HTTP 404), preventing resource enumeration.
+- **Password Recovery & Account Lifecycle:**
+  - `POST api/auth/reset-password` remains explicitly disabled, returning a uniform HTTP 400 Bad Request to prevent account enumeration and unauthorized overrides.
+  - `POST api/auth/change-password` requires verification of the current password using PBKDF2 hashing before accepting a new password.
+  - `DELETE api/auth/account` requires current password verification before performing destructive actions.
+  - **Stateless JWT Behavior on Account Deletion:** Because JWTs are stateless and verified via HMAC-SHA256 signature and expiration (`TokenValidationParameters.ValidateLifetime = true`), a previously issued token technically remains syntactically valid until its expiry time. However, because the user row and all associated child entities are deleted from the database, all authenticated endpoints that perform database user lookups fail with HTTP 404 (`UserNotFoundException`) or return empty datasets. For absolute token revocation, a Redis-backed token blacklist or token version stamp would be required for distributed multi-instance architectures.
+- **Error Response Uniformity & Information Leakage Prevention:**
+  - FluentValidation failures return consistent HTTP 400 Bad Request (`{ Error = ..., Errors = ... }`).
+  - Missing resources return HTTP 404 Not Found (`{ Error = ... }`).
+  - Duplicate email, active session conflicts, and seat conflicts return HTTP 409 Conflict (`{ Error = ... }`).
+  - Uncaught exceptions return HTTP 500 Internal Server Error with generic messages (`{ Error = "An unexpected error occurred..." }`), logging the underlying exception details securely to Serilog console without exposing SQL statements, connection strings, or stack traces to the client.
+
+---
+
+### 4. XP and Gamification Integrity & Concurrency Audit
+
+- **Server-Authoritative Awards:** All XP calculations, levels, and achievements are computed strictly on the backend. No client request parameter can supply or manipulate XP award amounts.
+- **Incomplete Session Protection:** Study sessions with `!session.IsCompleted` or `session.EndTime == null` return `XpAwardResult.NotEligible` and award 0 XP. Duration $< 5$ minutes awards 0 XP.
+- **Duplicate Award Prevention:**
+  - Ending an already ended study session is an idempotent no-op (`session.IsCompleted == true` skips award logic).
+  - Unchecking and re-checking a task checks `XpTransactions.AnyAsync(UserId, "TASK", taskId)`. Because the ledger record was inserted on first completion, rechecking awards 0 XP (`XpAwardResult.Duplicate`).
+  - Untoggling and re-toggling a habit completion on the same UTC date checks `XpTransactions.AnyAsync(UserId, "HABIT", $"{habitId}:{yyyy-MM-dd}")` and awards 0 duplicate XP.
+  - Achievements check `UserAchievements` catalog and database unique constraint `IX_UserAchievements_UserId_AchievementCode`, ensuring at most one unlock and one XP award per user.
+- **Atomicity & Ledger Integrity:**
+  - Staging `XpTransaction`, incrementing `User.XP`, calculating `User.Level = LevelCalculator.CalculateLevel(User.XP)`, and persisting the activity state commit within a single `SaveChangesAsync()` call.
+  - Non-positive award amounts are rejected with `XpAwardResult.NotEligible`.
+  - Balance overflow is checked: `(long)user.XP + amount > int.MaxValue` throws `OverflowException`.
+- **Concurrency Analysis Across Scenarios:**
+  1. *Single API Instance (In-Process Concurrency):* Fully protected. `UserConcurrencyLock.LockAsync(userId)` serializes all concurrent operations for the same user within the process, eliminating race conditions.
+  2. *Duplicate Source-Event Retries (Cross-Instance):* Fully protected by database unique constraints:
+     - `IX_XpTransactions_UserId_SourceType_SourceId` on `(UserId, SourceType, SourceId)`
+     - `IX_UserAchievements_UserId_AchievementCode` on `(UserId, AchievementCode)`
+     - `IX_HabitCompletions_HabitId_Date` on `(HabitId, Date)`
+     - `IX_StudySessions_ActiveUserId` on `(ActiveUserId)`
+     Any concurrent attempt hits DB error 1062, caught by `IsXpDuplicateCollision` / `IsAchievementDuplicateCollision`, which detaches the transaction, reloads the user, and safely recovers without duplicating XP.
+  3. *Concurrent Awards for DIFFERENT Events Across MULTIPLE API Instances (Release Limitation):*
+     - If two separate API instances process two different activities (e.g. Task A on Instance 1 and Task B on Instance 2) for the same user at the exact same millisecond:
+     - Both instances read `User.XP = 100`.
+     - Instance 1 inserts `XpTransaction(Task A, +15)` and sets `User.XP = 115`.
+     - Instance 2 inserts `XpTransaction(Task B, +15)` and sets `User.XP = 115`.
+     - Because `UserConcurrencyLock` is in-memory (`SemaphoreSlim`), both commit successfully. The ledger will record both transactions (30 XP total), but the denormalized `User.XP` row could suffer a lost update (`115` instead of `130`).
+     - **Recommendation / Blocker for Horizontal Scaling:** Multi-instance deployment requires distributed locking (e.g. MariaDB `GET_LOCK(CONCAT('user_', userId), 10)`), EF Core concurrency tokens (`RowVersion` on `User`), or atomic SQL increments (`UPDATE Users SET XP = XP + @amount WHERE Id = @userId`). For single-instance deployment, the current implementation is completely safe.
+
+---
+
+### 5. Analytics and Activity Correctness Audit
+
+- **Total Focus Minutes Parity:** `GetCurrentUserQueryHandler` and `GetFocusAnalyticsSummaryQueryHandler` both calculate total focus minutes using identical filtering: `s.UserId == userId && s.EndTime != null`.
+- **Duration Non-Negativity:** `EndStudySessionCommandHandler` computes duration using `Math.Max(0, (int)(session.EndTime.Value - session.StartTime).TotalMinutes)`. Analytics aggregation queries floor daily/weekly durations with `Math.Max(0, s.DurationMinutes)` to insulate against legacy anomalies.
+- **Date Range Semantics:**
+  - Daily analytics generates contiguous calendar days from `StartDate` to `EndDate` inclusive. Days with no activity return `FocusMinutes = 0`, `CompletedSessionsCount = 0`, `HabitCompletionsCount = 0`.
+  - Weekly analytics generates contiguous 7-day chronological intervals for past N weeks (default 4).
+  - Habit streak evaluation reuses `HabitStreakCalculator.CalculateStreak(h.Completions, todayUtc)`.
+- **Division-by-Zero Safety:**
+  - `taskCompletionRate` returns `0.0` when `totalTasks == 0`.
+  - `averageSessionMinutes` returns `0.0` when `completedSessions == 0`.
+
+---
+
+### 6. Flutter Client Integration Audit
+
+- **Contract Synchronization:** Flutter models (`GamificationSummary`, `AchievementItem`, `XpTransactionItem`, `UserProfile`, `DailyAnalytics`, `FocusAnalyticsSummary`) strictly map backend camelCase JSON contracts and include defensive parsing for numeric types and nullable dates.
+- **Network & Interceptors:** `NetworkClient` injects `Authorization: Bearer <token>` from `SharedPreferences`. Network timeouts (120s) and error payloads are mapped to user-friendly error messages.
+- **State Management & Caching:**
+  - Riverpod providers (`gamificationSummaryProvider`, `achievementsProvider`, `xpHistoryProvider`, `userProfileProvider`, `authStateProvider`) manage data state.
+  - Full cache invalidation implemented on pull-to-refresh, manual retry, user logout, and account deletion.
+- **UI Degradation & Fallbacks:**
+  - Unknown achievement icon strings safely fall back to `Icons.emoji_events_rounded`.
+  - Profile level progress falls back to `profile.level` and `profile.xp` while gamification summary loads.
+  - Empty and error states provide clear messaging and retry buttons.
+- **Static Analysis Status:**
+  - `flutter analyze --no-fatal-infos` -> **0 errors, 0 warnings**. 9 remaining infos are cosmetic Flutter 3.47 deprecations (`withOpacity` in legacy screens and `prefer_const`).
+
+---
+
+### 7. Database Migration & Deployment Safety Audit
+
+#### Migration Inventory and Status
+The repository contains 9 migrations. The first 4 were previously applied. The following 5 migrations are **pending deployment**:
+
+| Order | Migration Identifier | Target Table | Type | Breaking / Locking Risk |
+|---|---|---|---|---|
+| 1 | `20261012110919_FixStudySessionActiveUserIdColumn` | `StudySessions` | Schema DDL + Backfill + Unique Index | **HIGH:** Unique index creation fails if multiple uncompleted sessions exist for a single user. |
+| 2 | `20261012121819_AddRoomParticipantConstraints` | `RoomParticipants` | Schema DDL + Unique Indexes | **LOW/MEDIUM:** Unique index creation fails if duplicate seats or duplicate user entries exist in active rooms. |
+| 3 | `20261012175608_AddUniqueIndexToHabitCompletions` | `HabitCompletions` | Schema DDL + Unique Index | **HIGH:** Unique index creation fails if duplicate habit completions exist for the same `(HabitId, Date)`. |
+| 4 | `20261013113448_AddXpTransactionsLedger` | `XpTransactions` | Create Table + Unique Index | **LOW:** New table creation; zero existing rows. |
+| 5 | `20261013145328_AddUserAchievementsTable` | `UserAchievements` | Create Table + Unique Index | **LOW:** New table creation; zero existing rows. |
+
+#### Critical Operational Risk: Automatic Startup Migration
+- In `Program.cs` lines 116-120:
+  ```csharp
+  using (var scope = app.Services.CreateScope())
+  {
+      var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+      dbContext.Database.Migrate();
+  }
+  ```
+- **Hazard:** When `MOT.Api` boots with a live production database connection, `dbContext.Database.Migrate()` automatically attempts to apply all 5 pending migrations in sequence. If existing duplicate data exists in `HabitCompletions` or `StudySessions`, the migration will fail with MySQL Error 1062, aborting container startup.
+
+#### Pre-Migration Data Sanitation & Deployment Checklist (Runbook)
+Before applying migrations or booting an updated API container against staging/production:
+
+1. **Backup Database:** Execute a full logical backup (`mysqldump` / RDS snapshot) of the MariaDB database.
+2. **Audit & Deduplicate `StudySessions`:**
+   ```sql
+   -- Check for multiple active sessions per user
+   SELECT UserId, COUNT(*) 
+   FROM StudySessions 
+   WHERE IsCompleted = 0 AND EndTime IS NULL 
+   GROUP BY UserId 
+   HAVING COUNT(*) > 1;
+
+   -- Clean up older duplicate active sessions if found (keep only the newest)
+   UPDATE StudySessions s
+   INNER JOIN (
+       SELECT Id, UserId, ROW_NUMBER() OVER(PARTITION BY UserId ORDER BY StartTime DESC) as rn
+       FROM StudySessions
+       WHERE IsCompleted = 0 AND EndTime IS NULL
+   ) ranked ON s.Id = ranked.Id
+   SET s.IsCompleted = 1, s.EndTime = s.StartTime
+   WHERE ranked.rn > 1;
+   ```
+3. **Audit & Deduplicate `HabitCompletions`:**
+   ```sql
+   -- Check for duplicate completions on the same date
+   SELECT HabitId, Date, COUNT(*) 
+   FROM HabitCompletions 
+   GROUP BY HabitId, Date 
+   HAVING COUNT(*) > 1;
+
+   -- Deduplicate HabitCompletions keeping the oldest record
+   DELETE c1 FROM HabitCompletions c1
+   INNER JOIN HabitCompletions c2 
+   WHERE c1.HabitId = c2.HabitId 
+     AND c1.Date = c2.Date 
+     AND c1.Id > c2.Id;
+   ```
+4. **Flush Stale `RoomParticipants`:**
+   ```sql
+   -- Clean up ephemeral classroom seats
+   TRUNCATE TABLE RoomParticipants;
+   ```
+5. **Apply Migrations in Exact Order:**
+   Run EF Core migration bundle or execute `dotnet ef database update` in maintenance mode.
+
+---
+
+### 8. Automated Test Execution Summary
+
+| Test Suite | Execution Command | Tests Passed | Tests Failed | Pass Rate | Status |
+|---|---|---|---|---|---|
+| **Backend Build** | `dotnet build backend/MOT.Api/MOT.Api.csproj` | 0 Errors, 0 Warnings | — | 100% | **PASSED** |
+| **Backend Unit Tests** | `dotnet test backend/MOT.Tests/MOT.Tests.csproj` | **462** | 0 | 100% | **PASSED** |
+| **EF Model Snapshot** | `dotnet ef migrations has-pending-model-changes` | 0 pending changes | 0 | 100% | **PASSED** |
+| **Frontend Unit & Widget Tests** | `flutter test` (in `frontend/`) | **52** | 0 | 100% | **PASSED** |
+| **Frontend Static Analysis** | `flutter analyze --no-fatal-infos` | 0 Errors, 0 Warnings (9 cosmetic deprecations) | 0 | 100% | **PASSED** |
+
+*Note: All test executions run against clean in-memory mocks, isolated SQLite/InMemory contexts, and mocked Dio HTTP clients without remote network calls.*
+
+---
+
+### 9. Regression and Manual Smoke-Test Checklist
+
+| Functional Area | Test Scenario | Status | Verification Reference |
+|---|---|---|---|
+| **Authentication** | User registration with valid email, password, and name | **Automated** | `AuthenticationTests.cs` |
+| **Authentication** | User login with valid credentials (JWT token generation) | **Automated** | `AuthenticationTests.cs` |
+| **Authentication** | User login with invalid password (401 response) | **Automated** | `AuthenticationTests.cs` |
+| **Authentication** | Disabled self-service password reset (uniform 400 response) | **Automated** | `AuthController.cs` / `ProfileManagementTests.cs` |
+| **Authentication** | Authenticated password change with PBKDF2 verification | **Automated** | `ProfileManagementTests.cs` |
+| **Authentication** | Account deletion with password verification & cascade cleanup | **Automated** | `ProfileManagementTests.cs` / `auth_repository_and_cleanup_test.dart` |
+| **Authentication** | Logout / delete account clears all cached Riverpod providers | **Automated** | `auth_repository_and_cleanup_test.dart` |
+| **Daily Tasks** | Create task, list tasks, get task by ID (user-scoped) | **Automated** | `TaskHandlerTests.cs` |
+| **Daily Tasks** | Toggle task complete (awards 15 XP on first completion) | **Automated** | `TaskHandlerTests.cs` / `GamificationServiceTests.cs` |
+| **Daily Tasks** | Toggle task uncomplete (does not revoke XP; does not re-award on re-check) | **Automated** | `TaskHandlerTests.cs` / `XpLedgerTests.cs` |
+| **Daily Tasks** | Delete task (user-scoped) | **Automated** | `TaskHandlerTests.cs` |
+| **Habits** | Create habit, list habits, get habit by ID (user-scoped) | **Automated** | `HabitHandlerTests.cs` |
+| **Habits** | Toggle habit completion today (awards 20 XP on first completion) | **Automated** | `HabitHandlerTests.cs` / `GamificationServiceTests.cs` |
+| **Habits** | Toggle habit untoggle (removes completion; does not re-award XP on re-toggle) | **Automated** | `HabitHandlerTests.cs` / `XpLedgerTests.cs` |
+| **Habits** | Dynamic streak calculation (consecutive UTC days) | **Automated** | `HabitHandlerTests.cs` / `HabitStreakCalculator` |
+| **Study Sessions** | Start session (enforces single active session per user) | **Automated** | `StudySessionHandlerTests.cs` |
+| **Study Sessions** | End session (calculates duration, sets IsCompleted, awards duration XP) | **Automated** | `StudySessionHandlerTests.cs` / `GamificationServiceTests.cs` |
+| **Study Sessions** | Repeat session end (idempotent no-op; 0 duplicate XP) | **Automated** | `StudySessionHandlerTests.cs` / `XpLedgerTests.cs` |
+| **Study Sessions** | Abandoned/incomplete session (0 XP awarded; excluded from completed totals) | **Automated** | `StudySessionHandlerTests.cs` / `AnalyticsTests.cs` |
+| **Analytics** | Focus summary (total, today, week, average session, task/habit rates) | **Automated** | `AnalyticsTests.cs` / `UserProfileHandlerTests.cs` |
+| **Analytics** | Daily breakdown (contiguous chronological days, empty day handling) | **Automated** | `AnalyticsTests.cs` / `GetDailyAnalyticsQuery` |
+| **Analytics** | Weekly breakdown (contiguous 7-day intervals) | **Automated** | `AnalyticsTests.cs` / `GetWeeklyAnalyticsQuery` |
+| **Gamification** | Level calculation formulas (threshold boundaries, levels 1–50) | **Automated** | `LevelCalculatorTests.cs` |
+| **Gamification** | Achievement catalog evaluation (8 achievements: first step, initiate, deep diver, etc.) | **Automated** | `AchievementServiceTests.cs` / `AchievementCatalogTests.cs` |
+| **Gamification** | Read-only APIs (`GET /summary`, `GET /achievements`, `GET /history`) | **Automated** | `GamificationApiTests.cs` |
+| **Gamification** | History query limit validation (1–100 boundary checking) | **Automated** | `GamificationApiTests.cs` / `GetXpHistoryQueryValidator` |
+| **Virtual Classroom** | Join room, assign seat, detect room full (12 max) | **Automated** | `ClassroomHandlerTests.cs` |
+| **Virtual Classroom** | Seat collision handling and heartbeat ping | **Automated** | `ClassroomHandlerTests.cs` |
+| **Flutter UI** | Profile screen level card, achievements tile, recent XP activity list | **Automated** | `gamification_ui_and_provider_test.dart` |
+| **Flutter UI** | Achievements screen progress banner, locked/unlocked cards, icon fallback | **Automated** | `gamification_ui_and_provider_test.dart` |
+| **Flutter UI** | Pull-to-refresh and network error retry buttons | **Automated** | `gamification_ui_and_provider_test.dart` |
+| **Physical Testing** | Live camera/microphone stream in WebRTC classroom on iOS/Android device | **Not Yet Verified** | Requires physical device testing on staging environment |
+| **Physical Testing** | Push notifications and background timer alerts on physical device | **Not Yet Verified** | Requires physical device testing on staging environment |
+
+---
+
+### 10. Release Assessment and Categorization
+
+#### Selected Assessment Category:
+### **2. Ready for controlled staging deployment**
+
+#### Detailed Justification Based on Verified Evidence:
+1. **Why Local Testing and Controlled Staging are READY:**
+   - 100% of automated tests pass across both backend (462/462) and frontend (52/52).
+   - EF Core model snapshot is in 100% parity with code (`has-pending-model-changes` returns 0).
+   - All authorization, identity-scoping, and error-handling requirements are verified.
+   - All gamification award rules, idempotency guards, and single-instance concurrency serialization are proven.
+   - All Flutter models, repositories, and Riverpod cache lifecycles are validated and clean of analyzer warnings.
+
+2. **Why Production Deployment is BLOCKED Pending Actions:**
+   - **Unapplied Remote Database Migrations:** 5 migrations remain unapplied to the remote database.
+   - **Pre-Migration Data Risks:** If the remote database has existing duplicate habit completions or unclosed study sessions, the automatic `dbContext.Database.Migrate()` on startup will crash with Error 1062. Pre-migration deduplication SQL scripts must be executed before deployment.
+   - **Horizontal Multi-Instance Scaling Limitation:** Distributed concurrency safety across multiple API container replicas is not yet database-backed (currently in-process via `SemaphoreSlim`). The production environment must run as a single container instance until distributed locks or concurrency tokens are deployed.
+

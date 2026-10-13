@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
 import 'package:mind_on_track/features/auth/data/auth_repository.dart';
 import 'package:mind_on_track/features/auth/presentation/providers/auth_provider.dart';
+import 'package:mind_on_track/features/gamification/presentation/providers/gamification_providers.dart';
 import 'package:mind_on_track/core/network_client.dart';
 
 // Helper mock network client using Dio with interceptors / custom adapter
@@ -162,7 +163,7 @@ void main() {
       expect(profile.totalFocusMinutes, 120);
     });
 
-    test('Riverpod cache invalidation cleans userProfileProvider and resets authStateProvider', () {
+    test('Riverpod cache invalidation cleans userProfileProvider, gamification providers, and resets authStateProvider', () {
       final container = ProviderContainer(
         overrides: [
           authStateProvider.overrideWith((ref) => true),
@@ -174,6 +175,9 @@ void main() {
       // Simulate post-deletion cleanup
       container.read(authStateProvider.notifier).state = false;
       container.invalidate(userProfileProvider);
+      container.invalidate(gamificationSummaryProvider);
+      container.invalidate(achievementsProvider);
+      container.invalidate(xpHistoryProvider);
 
       expect(container.read(authStateProvider), isFalse);
     });

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../auth/presentation/screens/login_screen.dart';
+import '../../../gamification/presentation/providers/gamification_providers.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -76,8 +77,11 @@ class SettingsScreen extends ConsumerWidget {
                         final authRepo = ref.read(authRepositoryProvider);
                         await authRepo.deleteAccount(password);
 
-                        // Success cleanup: invalidate profile cache and reset auth state
+                        // Success cleanup: invalidate profile and gamification caches and reset auth state
                         ref.invalidate(userProfileProvider);
+                        ref.invalidate(gamificationSummaryProvider);
+                        ref.invalidate(achievementsProvider);
+                        ref.invalidate(xpHistoryProvider);
                         ref.read(authStateProvider.notifier).state = false;
 
                         if (dialogContext.mounted) {
