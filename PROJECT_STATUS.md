@@ -625,6 +625,88 @@ A targeted pre-Phase 5 audit was performed covering JWT invalidation, Flutter cl
   - `HabitCompletions`: 0 duplicate `(HabitId, Date)` entries found; safe to apply `AddUniqueIndexToHabitCompletions`.
 - **Remote DB Protection:** Strict constraint honored — no migrations were executed against the remote database.
 
+## Phase 5: Focus Analytics Backend
+
+**Status: VERIFIED & COMPLETE**
+
+Focus analytics endpoints, CQRS queries, handlers, DTOs, FluentValidation validators, and tests were implemented across the ASP.NET Core backend and verified against the Flutter client architecture.
+
+### 1. Data Integrity and Metric Definitions
+- **Total Focus Minutes:** Computed using `s.UserId == userId && s.EndTime != null` summing `DurationMinutes`. Strictly regression-tested against `GetCurrentUserQuery` (Profile total) ensuring identical calculation.
+- **Session Exclusion:** Active / unfinished sessions (`EndTime == null`, `!IsCompleted`) are strictly excluded from completed focus totals and placed in `IncompleteSessionsCount`.
+- **Daily Focus Bucketing:** Completed study sessions are attributed to their UTC start date (`s.StartTime.Date`). Contiguous daily records are generated across the requested range (`[StartDate, EndDate]`), ensuring empty days return `0` values for stable charting.
+- **Weekly Focus Aggregation:** Generates contiguous 7-day chronological intervals for past N weeks (1 to 12 weeks, default 4).
+- **Task Summary:** Computed from `DailyTask` (`TotalTasks`, `CompletedTasks`, `PendingTasks`, and `CompletionRatePercentage`). Because the database stores no `CompletedAt` timestamp, task metrics accurately reflect current task board state.
+- **Habit Summary:** Reuses `HabitStreakCalculator` to compute `TotalHabits`, `TotalCompletions`, `CompletionsToday`, `CompletionsThisWeek`, and `ActiveStreaksCount`.
+
+### 2. Endpoints Exposed
+- `GET /api/analytics/summary`: Lifetime and rolling 7-day summary metrics, session breakdown, task completion rates, and habit streaks.
+- `GET /api/analytics/daily?startDate=yyyy-MM-dd&endDate=yyyy-MM-dd`: Contiguous daily breakdown for a bounded range (max 90 days, validated via FluentValidation).
+- `GET /api/analytics/weekly?weeks=4`: Chronological weekly intervals (1–12 weeks).
+
+### 3. Security and Scoping
+- All analytics queries derive user identity exclusively from `ICurrentUserService.UserId`.
+- Client-supplied user IDs are rejected / not accepted.
+- Cross-user isolation verified: User A's queries never receive User B's sessions, tasks, or habits.
+
+### 4. Flutter Integration
+- Created `FocusAnalyticsSummary` and `DailyAnalytics` models in `frontend/lib/features/analytics/data/models/`.
+- Created `AnalyticsRepository` in `frontend/lib/features/analytics/data/repositories/`.
+- Supported both Map and JSON string responses with graceful fallback.
+
+### 5. Build and Test Summary
+- **Backend API Build:** `dotnet build MOT.Api/MOT.Api.csproj` -> **0 Errors, 0 Warnings**.
+- **Backend Test Suite:** `dotnet test MOT.Tests/MOT.Tests.csproj` -> **249/249 passed (100%)** (18 new unit, regression, boundary, and controller tests added in `AnalyticsTests.cs`).
+- **Frontend Test Suite:** `flutter test` -> **24/24 passed (100%)** (5 new model and repository tests added in `analytics_model_and_repository_test.dart`).
+- **EF Model Snapshot Check:** `dotnet ef migrations has-pending-model-changes` -> **0 pending model changes**.
+- **Remote DB Protection:** Strict constraint honored — no migrations applied to remote production database.
+
+## Phase 5 Final Analytics Verification
+
+**Status: AUDIT & VERIFICATION COMPLETE**
+
+A comprehensive safety audit and verification of the Focus Analytics backend was executed before proceeding to Phase 6.
+
+### 1. Focus-Time Accuracy & Session End Hardening
+- **Duration Calculation & Clock Skew:** In `EndStudySessionCommand.cs`, duration calculation was hardened to `session.DurationMinutes = Math.Max(0, (int)(session.EndTime.Value - session.StartTime).TotalMinutes);`, preventing negative durations caused by system clock adjustments or slight drifts.
+- **Session End Idempotency:** Re-ending an already completed session (`isCompleted == true`) idempotently returns the existing session DTO without modifying `EndTime` or `DurationMinutes` and without issuing redundant database writes. Verified via unit test `EndStudySession_WhenCalledRepeatedly_IsIdempotentAndDoesNotModifyEndTimeOrDuration`.
+- **Clock Drift Floor Verification:** Verified via unit test `EndStudySession_WhenStartTimeIsInFutureDueToClockSkew_FloorsDurationAtZero` that future start times floor `DurationMinutes` at 0.
+- **Profile & Analytics Totals Parity:** Verified that `GetCurrentUserQuery` (Profile total) and `GetFocusAnalyticsSummaryQuery` (Analytics total) use identical business logic: `_context.StudySessions.Where(s => s.UserId == userId && s.EndTime != null).SumAsync(s => s.DurationMinutes)`. Regression-tested in `Summary_TotalFocusMinutes_RegressionMatchesProfileCalculation`.
+- **Active/Incomplete Session Exclusion:** Unfinished sessions (`EndTime == null`, `!IsCompleted`) are excluded from completed focus minutes and counted exclusively under `IncompleteSessionsCount`.
+
+### 2. Date Boundaries and Range Semantics
+- **Daily Analytics Date Semantics:**
+  - `StartDate` and `EndDate` are inclusive calendar dates in UTC.
+  - Sessions are bucketed by `s.StartTime.Date` (UTC midnight). Query filters `s.StartTime >= effectiveStartDate && s.StartTime < endExclusive` where `endExclusive = effectiveEndDate.AddDays(1)`.
+  - Contiguous daily breakdown is generated without date gaps. Empty days return `FocusMinutes = 0`, `CompletedSessionsCount = 0`, and `HabitCompletionsCount = 0`.
+  - Max date range is 90 days, validated via FluentValidation (`GetDailyAnalyticsQueryValidator`). Rejects `StartDate > EndDate` and ranges exceeding 90 days.
+  - Defensively floors daily and weekly focus minute calculations with `Math.Max(0, s.DurationMinutes)` to insulate against legacy negative values.
+- **Weekly Analytics Date Semantics:**
+  - Generates contiguous 7-day chronological intervals for past N weeks (1 to 12 weeks, default 4) ending on `effectiveEndDate`.
+  - Week 1 is the oldest week, Week N is the current/most recent week.
+
+### 3. Summary Metrics & Division-by-Zero Safety
+- **Zero-Task Scenarios:** Returns `0.0` for `CompletionRatePercentage` when `TotalTasks == 0`, avoiding `DivideByZeroException` or `NaN`.
+- **Zero-Session Scenarios:** Returns `0.0` for `AverageSessionMinutes` when `CompletedSessionsCount == 0`.
+- **Habit Streaks:** Evaluated consistently using `HabitStreakCalculator.CalculateStreak(h.Completions, todayUtc).CurrentStreak >= 1`.
+- **UTC Windowing:** `TodayFocusMinutes` evaluates UTC today (`[DateTime.UtcNow.Date, DateTime.UtcNow.Date.AddDays(1))`); `ThisWeekFocusMinutes` evaluates a rolling 7-day UTC window (`[DateTime.UtcNow.Date.AddDays(-6), DateTime.UtcNow.Date.AddDays(1))`).
+
+### 4. Flutter Integration & Contract Alignment
+- Backend camelCase DTOs map 1:1 with Flutter models:
+  - `FocusAnalyticsSummary`: `totalFocusMinutes`, `todayFocusMinutes`, `thisWeekFocusMinutes`, `totalSessionsCount`, `completedSessionsCount`, `incompleteSessionsCount`, `averageSessionMinutes`, `tasks`, `habits`.
+  - `DailyAnalytics`: `startDate`, `endDate`, `totalFocusMinutes`, `totalCompletedSessions`, `totalHabitCompletions`, `dailyBreakdown`.
+- Error handling in `AnalyticsRepository` tested for timeouts, 400, 401, 500, and non-JSON server error payloads.
+
+### 5. Database Schema & Migration Status
+- **Zero Schema Changes for Analytics:** Analytics relies entirely on existing columns and indexes across `StudySessions`, `DailyTasks`, `Habits`, and `HabitCompletions`.
+- **Pending Remote Migrations:** Confirmed 0 changes to model snapshot (`dotnet ef migrations has-pending-model-changes`). The 3 previously pending migrations (`FixStudySessionActiveUserIdColumn`, `AddRoomParticipantConstraints`, `AddUniqueIndexToHabitCompletions`) remain unapplied to the remote database per project safety constraints.
+
+### 6. Verification & Test Suite Summary
+- **Backend Build:** `dotnet build MOT.Api/MOT.Api.csproj` -> **0 Errors, 0 Warnings**.
+- **Backend Test Suite:** `dotnet test MOT.Tests/MOT.Tests.csproj` -> **254/254 passed (100%)** (+5 tests added: 2 in `StudySessionHandlerTests.cs` and 3 in `AnalyticsTests.cs`).
+- **Frontend Test Suite:** `flutter test` -> **24/24 passed (100%)**.
+
+
 
 
 

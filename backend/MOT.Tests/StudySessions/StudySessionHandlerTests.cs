@@ -124,6 +124,73 @@ public class StudySessionHandlerTests
     }
 
     [Fact]
+    public async Task EndStudySession_WhenCalledRepeatedly_IsIdempotentAndDoesNotModifyEndTimeOrDuration()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var initialEndTime = DateTime.UtcNow.AddMinutes(-5);
+        var session = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Completed Physics",
+            StartTime = DateTime.UtcNow.AddMinutes(-50),
+            EndTime = initialEndTime,
+            DurationMinutes = 45,
+            IsCompleted = true
+        };
+        _sessions.Add(session);
+
+        var handler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var command = new EndStudySessionCommand { SessionId = session.Id };
+
+        // Act
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Id.Should().Be(session.Id);
+        result.IsCompleted.Should().BeTrue();
+        result.EndTime.Should().Be(initialEndTime);
+        result.DurationMinutes.Should().Be(45);
+
+        // SaveChangesAsync should not be called again
+        _dbContextMock.Verify(c => c.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task EndStudySession_WhenStartTimeIsInFutureDueToClockSkew_FloorsDurationAtZero()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var session = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Future Clock Session",
+            StartTime = DateTime.UtcNow.AddMinutes(10), // Clock skew: future start
+            IsCompleted = false
+        };
+        _sessions.Add(session);
+
+        var handler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var command = new EndStudySessionCommand { SessionId = session.Id };
+
+        // Act
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.DurationMinutes.Should().Be(0);
+        session.DurationMinutes.Should().Be(0);
+        session.IsCompleted.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task EndStudySession_WhenSessionBelongsToAnotherUser_ThrowsNotFoundAndDoesNotModifySession()
     {
         // Arrange

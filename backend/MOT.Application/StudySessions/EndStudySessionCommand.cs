@@ -39,7 +39,7 @@ namespace MOT.Application.StudySessions
             if (!session.IsCompleted)
             {
                 session.EndTime = DateTime.UtcNow;
-                session.DurationMinutes = (int)(session.EndTime.Value - session.StartTime).TotalMinutes;
+                session.DurationMinutes = Math.Max(0, (int)(session.EndTime.Value - session.StartTime).TotalMinutes);
                 session.IsCompleted = true;
                 session.ActiveUserId = null;
                 
