@@ -706,12 +706,576 @@ A comprehensive safety audit and verification of the Focus Analytics backend was
 - **Backend Test Suite:** `dotnet test MOT.Tests/MOT.Tests.csproj` -> **254/254 passed (100%)** (+5 tests added: 2 in `StudySessionHandlerTests.cs` and 3 in `AnalyticsTests.cs`).
 - **Frontend Test Suite:** `flutter test` -> **24/24 passed (100%)**.
 
+## Phase 6 — Gamification Discovery and Design
 
+**Status: DISCOVERY & DESIGN COMPLETE (PENDING APPROVAL TO IMPLEMENT)**
 
+A complete discovery, architecture audit, and design specification for Phase 6 (Gamification: XP, Levels, and Achievements) was conducted across the MOT backend and Flutter client.
 
+### 1. Existing Functionality Verified
+- **User Entity Properties:**
+  - `User.cs` already contains `public int XP { get; set; } = 0;`, `public int Level { get; set; } = 1;`, and `public int CurrentStreak { get; set; } = 0;`.
+  - These columns already exist in the MariaDB `Users` table and the EF Core model snapshot. Currently, they default to `0, 1, 0` and are not updated by any business logic.
+  - `UserProfileDto` and `GetCurrentUserQuery` already return `Level` and `XP`.
+- **Study Sessions:**
+  - Entity: `StudySession` (`Id`, `UserId`, `StartTime`, `EndTime`, `DurationMinutes`, `IsCompleted`).
+  - Completion Event: `EndStudySessionCommand` sets `EndTime = DateTime.UtcNow`, `DurationMinutes = Math.Max(0, ...)`, and `IsCompleted = true`.
+  - Idempotency: Re-ending an already completed session is a safe no-op.
+  - Active/Abandoned: Sessions with `EndTime == null` or `!IsCompleted` remain incomplete and are never eligible for XP.
+- **Daily Tasks:**
+  - Entity: `DailyTask` (`Id`, `UserId`, `Title`, `Description`, `IsCompleted`, `CreatedAt`).
+  - Completion Event: `ToggleTaskCommand` (inverts `IsCompleted`) and `UpdateTaskCommand` (sets `IsCompleted`).
+  - Critical Finding: `DailyTask` has **no `CompletedAt` timestamp**. Tasks can be checked, unchecked, and rechecked indefinitely.
+- **Habits & Completions:**
+  - Entity: `Habit` and `HabitCompletion` (`Id`, `HabitId`, `Date` normalized to UTC midnight).
+  - Completion Event: `ToggleHabitCompletionCommand`. If already completed for UTC today, untoggles (`RemoveRange`); if not, inserts completion with unique index on `(HabitId, Date)`.
+  - Streaks: Centralized `HabitStreakCalculator` dynamically computes streaks from dates. No stored streak snapshot exists in `Habit` or `User`.
+- **Identity & Security:**
+  - All operations resolve `UserId` strictly via `ICurrentUserService.UserId`.
+  - Client input cannot supply or override `UserId`.
+- **Account Deletion & Cascading:**
+  - `DeleteAccountCommand` removes `User`. MariaDB foreign keys (`Tasks`, `Habits`, `HabitCompletions`, `StudySessions`) are configured with `ON DELETE CASCADE`. Any new gamification tables referencing `Users` must also use `ON DELETE CASCADE`.
+- **Flutter Baseline:**
+  - `UserProfile.fromJson` already parses `level` and `xp`.
+  - `ProfileScreen` already displays `'Level ${profile.level} • ${profile.xp} XP'`.
+  - `HomeScreen` provides standard 5-tab navigation (`Tasks`, `Habits`, `Timer`, `Live`, `Profile`).
 
+### 2. Proposed XP Award Rules and Values (Configurable)
+All values will be encapsulated in a configurable options class (`GamificationOptions`):
+- **Study Session Completion:**
+  - Base Award: **10 XP** for any completed session of $\ge 5$ minutes.
+  - Duration Rate: **1 XP for every 2 minutes** of completed focus time (e.g., 25-minute Pomodoro = 22 XP; 50-minute session = 35 XP).
+  - Anti-Gaming Cap: Maximum 70 XP per single session (120-minute cap). Sessions $< 5$ minutes award 0 XP.
+- **Daily Task Completion:**
+  - Base Award: **15 XP** per completed task.
+  - Award Policy: One-time award per `TaskId`. If untoggled and retoggled, 0 additional XP.
+- **Habit Completion:**
+  - Base Award: **20 XP** per completed habit per calendar day.
+  - Award Policy: One-time award per `(HabitId, Date)`. If untoggled and retoggled on the same day, 0 additional XP.
+- **Streak Bonuses:**
+  - Awarded exclusively through milestone achievements (3-day, 7-day, 30-day streaks) to prevent compounding mathematical drift or timezone exploits.
 
+### 3. Idempotency and Concurrency Strategy
+- **Durable Append-Only XP Ledger (`XpTransactions` table):**
+  - Rather than directly incrementing `User.XP` without an audit trail, every XP event creates an immutable ledger entry.
+  - Unique composite constraint: `UQ_XpTransactions_UserId_SourceType_SourceId` on `(UserId, SourceType, SourceId)`.
+  - `SourceType`: `"StudySession"`, `"Task"`, `"Habit"`, `"Achievement"`.
+  - `SourceId`:
+    - Study Session: `SessionId.ToString()`
+    - Daily Task: `TaskId.ToString()`
+    - Habit: `"{HabitId}:{Date:yyyy-MM-dd}"`
+    - Achievement: `AchievementCode`
+- **Toggling & Re-completion Behavior:**
+  - If a user unchecks a task or untoggles a habit, their historical earned XP is preserved (preventing negative balances and level demotions).
+  - If the user re-checks the task or re-toggles the habit, the transaction lookup checks if a record with `(UserId, SourceType, SourceId)` already exists. If found, **0 additional XP** is awarded.
+- **Concurrency Collision Handling:**
+  - In concurrent requests from multiple devices, the unique constraint catches MariaDB Error 1062 (`DbUpdateException`), detaches the duplicate candidate entity, and returns idempotently.
+- **Materialized Balance Synchronization:**
+  - `User.XP` and `User.Level` are updated atomically in the same transaction as the ledger record, guaranteeing $O(1)$ read performance for user profiles while maintaining 100% auditability and reconciliation capability (`ReconcileUserXp`).
 
+### 4. Level Progression Formula
+- **Deterministic Quadratic Progression:**
+  - Level $L$ total XP threshold:
+    $$\text{Threshold}(L) = 50 \cdot L \cdot (L - 1)$$
+  - Level derivation from total XP $X$:
+    $$\text{Level}(X) = \max\left(1, \left\lfloor \frac{1 + \sqrt{1 + \frac{2X}{25}}}{2} \right\rfloor\right)$$
+  - Milestone table:
+    - Level 1: 0 – 99 XP (100 XP to Level 2)
+    - Level 2: 100 – 299 XP (200 XP to Level 3)
+    - Level 3: 300 – 599 XP (300 XP to Level 4)
+    - Level 4: 600 – 999 XP (400 XP to Level 5)
+    - Level 5: 1000 – 1499 XP (500 XP to Level 6)
+  - Level Progress:
+    - Current level base: $XP_{curr} = 50 \cdot L \cdot (L - 1)$
+    - Next level target: $XP_{next} = 50 \cdot (L + 1) \cdot L$
+    - Delta: $XP_{delta} = 100 \cdot L$
+    - Progress %: $\text{Math.Clamp}((double)(X - XP_{curr}) / XP_{delta}, 0.0, 1.0)$
+  - Mathematical Properties: Closed-form $O(1)$, zero-XP yields Level 1 at 0%, strictly monotonic, cannot overflow signed 32-bit `int` (Level 5000 requires $>1.2$ billion XP).
 
+### 5. Initial Achievements Catalog
+Achievements are defined as code constants in `MOT.Domain` and persisted upon unlock in `UserAchievements`:
+1. `FIRST_STEP`: Complete your first daily task (+25 XP).
+2. `FOCUS_INITIATE`: Complete your first study session of $\ge 15$ minutes (+25 XP).
+3. `HABIT_STARTER`: Complete your first habit (+25 XP).
+4. `CENTURY_CLUB`: Reach 100 total minutes of focus time (+50 XP).
+5. `DEEP_DIVER`: Complete a single focus session of $\ge 60$ minutes (+50 XP).
+6. `STREAK_BUILDER`: Reach a 3-day habit streak on any habit (+50 XP).
+7. `UNSTOPPABLE`: Reach a 7-day habit streak on any habit (+100 XP).
+8. `TASK_MASTER`: Complete 10 daily tasks total (+75 XP).
 
+- **Unlock Safety:**
+  - Unique composite constraint: `UQ_UserAchievements_UserId_AchievementCode` on `(UserId, AchievementCode)`.
+  - Duplicate unlocks are strictly blocked at both the application level and database constraint level.
+
+### 6. Proposed Entities, Indexes, and Migrations
+- **Proposed Entities:**
+  1. `XpTransaction`:
+     - `Guid Id` (PK)
+     - `Guid UserId` (FK -> `Users(Id)`, `ON DELETE CASCADE`)
+     - `int Amount` (positive integer)
+     - `string SourceType` (`varchar(32)`)
+     - `string SourceId` (`varchar(64)`)
+     - `string Description` (`varchar(200)`)
+     - `DateTime CreatedAt` (`datetime(6)`, UTC)
+     - Unique Index: `(UserId, SourceType, SourceId)`
+     - Index: `(UserId, CreatedAt)`
+  2. `UserAchievement`:
+     - `Guid Id` (PK)
+     - `Guid UserId` (FK -> `Users(Id)`, `ON DELETE CASCADE`)
+     - `string AchievementCode` (`varchar(64)`)
+     - `DateTime UnlockedAt` (`datetime(6)`, UTC)
+     - `int XpAwarded`
+     - Unique Index: `(UserId, AchievementCode)`
+- **Existing User Entity:**
+  - `Users` table already has `XP`, `Level`, `CurrentStreak`. No schema change needed for `User`.
+- **Migration Plan:**
+  - A single local migration (e.g. `20261013xxxxxx_AddGamificationTables`) will be scaffolded during implementation.
+  - Per project rules, no migrations are generated or applied during discovery.
+- **MariaDB 10.11 Compatibility:**
+  - Relies solely on standard `char(36)`, `varchar`, `int`, and composite unique indexes. Zero triggers or generated columns required. Fully compatible with MariaDB 10.11.
+
+### 7. API Endpoints Proposal
+1. `GET /api/gamification/summary`:
+   - Returns: `currentLevel`, `totalXp`, `levelBaseXp`, `nextLevelXp`, `progressPercentage`, `totalAchievementsCount`, `unlockedAchievementsCount`.
+2. `GET /api/gamification/achievements`:
+   - Returns: List of all achievements with `code`, `title`, `description`, `iconName`, `xpAwarded`, `isUnlocked`, `unlockedAt`.
+3. `GET /api/gamification/history?limit=20`:
+   - Returns: Paginated list of recent `XpTransactionDto` records for activity feed.
+
+### 8. Flutter Implementation Plan
+- **Presentation Enhancements:**
+  - **Level Progress Indicator:** In `ProfileScreen`, replace the static level chip with an interactive card showing the current level, total XP, next level target, and a smooth `LinearProgressIndicator`.
+  - **Achievements Section:** Add an "Achievements" row in `ProfileScreen` displaying unlocked badges and a button navigating to `AchievementsScreen`.
+  - **Recent Activity Feed:** Display the last 5 XP transactions under the stat cards.
+  - **Gamification Feedback:** Surface a celebratory snackbar/toast when completing a session, task, or habit (`"+20 XP earned!"`).
+- **Data Layer:**
+  - Create `frontend/lib/features/gamification/data/models/gamification_summary.dart` and `achievement.dart`.
+  - Create `frontend/lib/features/gamification/data/repositories/gamification_repository.dart`.
+  - Create Riverpod providers: `gamificationSummaryProvider`, `achievementsProvider`.
+
+### 9. Risks, Unresolved Decisions, and Test Plan
+- **Risks & Edge Cases:**
+  - *Concurrent Multi-Device Activity:* Handled via database composite unique constraints and graceful Error 1062 catching.
+  - *Zero XP / Fresh Account:* Handled gracefully by formula ($X=0 \implies Level=1, Progress=0.0$).
+  - *Timezone Shift on Habits:* Habit completion date is normalized to UTC midnight, matching existing Phase 3 behavior.
+- **Unresolved Design Decisions for Approval:**
+  1. *Untoggle XP Policy:* Proposed design keeps previously awarded XP and gives 0 XP on re-toggle. Alternative is decrementing XP, which risks negative balances and level demotions. (Recommended: Keep XP, award 0 on re-toggle).
+  2. *Achievement Definitions Storage:* Proposed in-code definitions in `MOT.Domain` vs database seed table. (Recommended: In-code definitions to avoid fragile database seeding).
+- **Test Plan:**
+  - Level formula unit tests (0 XP, boundary values, level transitions, progress math, overflow safety).
+  - XP ledger unit tests (first award, duplicate blocked, uncheck/recheck blocked, concurrent collision).
+  - Achievement evaluator tests (first task unlock, focus duration threshold, streak milestone, duplicate unlock blocked).
+  - Controller and authorization tests (200, 401, cross-user isolation).
+  - Flutter model deserialization and state-management tests.
+
+### 10. Subphases Breakdown (Implementation Order)
+- **Phase 6.1 — Gamification Domain Core & Ledger:** Domain entities (`XpTransaction`, `UserAchievement`), `LevelCalculator`, DbContext configuration, local migration scaffolding, and core unit tests.
+- **Phase 6.2 — XP Award Service & Event Handlers:** `IGamificationService` integration into `EndStudySessionCommand`, `ToggleTaskCommand`, and `ToggleHabitCompletionCommand` with idempotency guards and handler unit tests.
+- **Phase 6.3 — Achievement Catalog & Evaluation Engine:** In-code achievement catalog, condition evaluator, unlock pipeline, and regression tests.
+- **Phase 6.4 — Gamification API & Controllers:** `GamificationController` (`summary`, `achievements`, `history`), DTOs, queries, handlers, and HTTP integration tests.
+- **Phase 6.5 — Flutter Client Gamification Integration:** Models, repository, Riverpod providers, `ProfileScreen` level progress bar, `AchievementsScreen`, and widget/model tests.
+
+## Phase 6.1 — Core Domain and XP Ledger Implementation
+
+**Status: IMPLEMENTATION & VERIFICATION COMPLETE**
+
+Phase 6.1 established the durable XP ledger and pure domain-level progression calculator in accordance with Clean Architecture principles.
+
+### 1. Entities and Domain Constants
+- **`XpTransaction` Entity (`MOT.Domain.Entities.XpTransaction`):**
+  - `Id`: GUID primary key (`Guid.NewGuid()`).
+  - `UserId`: GUID foreign key referencing `Users(Id)` with `OnDelete(DeleteBehavior.Cascade)`.
+  - `Amount`: Integer positive XP amount awarded.
+  - `SourceType`: Max length 32 (`varchar(32)`), categorizing source (`StudySession`, `Task`, `Habit`, `Achievement`, `Bonus`).
+  - `SourceId`: Max length 64 (`varchar(64)`), durable identifier for the triggering event (`SessionId`, `TaskId`, `"{HabitId}:{Date:yyyy-MM-dd}"`, `AchievementCode`).
+  - `Description`: Max length 200 (`varchar(200)`), human-readable description for activity logs.
+  - `CreatedAt`: UTC timestamp (`DateTime.UtcNow`).
+- **`XpSourceTypes` Constants (`MOT.Domain.Gamification.XpSourceTypes`):**
+  - Defines strongly-typed constants: `StudySession`, `Task`, `Habit`, `Achievement`, `Bonus`.
+
+### 2. EF Core Model Configuration & Indexes
+- Added `DbSet<XpTransaction> XpTransactions { get; set; }` to `IAppDbContext` and `AppDbContext`.
+- Configured entity in `AppDbContext.OnModelCreating`:
+  - Foreign key: `FK_XpTransactions_Users_UserId` referencing `Users(Id)` with cascade delete (`ON DELETE CASCADE`).
+  - Unique composite index: `IX_XpTransactions_UserId_SourceType_SourceId` on `(UserId, SourceType, SourceId)` for duplicate award prevention.
+  - History query index: `IX_XpTransactions_UserId_CreatedAt` on `(UserId, CreatedAt)`.
+  - Column length constraints configured for MariaDB 10.11 utf8mb4 index safety (total composite index key length $\le 528$ bytes, far below MariaDB's 3072-byte InnoDB limit).
+
+### 3. LevelCalculator Domain Logic
+- Implemented pure domain calculator in `MOT.Domain.Gamification.LevelCalculator`:
+  - Formula: $\text{Threshold}(L) = 50 \cdot L \cdot (L - 1)$.
+  - Delta: $\Delta(L) = 100 \cdot L$ XP required to advance from Level $L$ to $L + 1$.
+  - Negative XP clamped to 0 (Level 1, 0.0% progress).
+  - Exact boundary transition verification: Uses 64-bit integer comparisons against thresholds to eliminate floating-point square-root inaccuracy near level boundaries.
+  - 32-bit integer overflow protection: Internal calculations use `long` (64-bit integers), preventing overflow up to `int.MaxValue` ($2,147,483,647$ XP = Level 6554).
+  - Returns `LevelProgress` record containing: `Level`, `TotalXp`, `CurrentLevelThresholdXp`, `NextLevelThresholdXp`, `XpEarnedInCurrentLevel`, `XpRequiredForNextLevel`, `ProgressFraction` (clamped $[0.0, 1.0]$).
+
+### 4. Atomicity Design for Phase 6.2
+When integrating award operations into command handlers in Phase 6.2:
+1. **Pre-check:** `IGamificationService.AwardXpAsync` checks whether an `XpTransaction` already exists for `(UserId, SourceType, SourceId)`. If present, it returns an idempotent no-op (`AlreadyAwarded = true`, 0 XP).
+2. **Transaction Insertion:** If not present, creates and stages the `XpTransaction` entity on the DbContext.
+3. **User Balance Mutation:** Atomically mutates `user.XP += amount` and sets `user.Level = LevelCalculator.CalculateLevel(user.XP)` within the same DbContext ChangeTracker.
+4. **Commit & Collision Recovery:** Calls `await _context.SaveChangesAsync(cancellationToken)`. If a concurrent request creates a collision on `(UserId, SourceType, SourceId)`, MariaDB raises Error 1062 (`DbUpdateException`). The handler catches this error, detaches the unpersisted `XpTransaction`, reloads/reverts the user entity, and returns `AlreadyAwarded = true` without throwing an unhandled exception or double-incrementing the balance.
+
+### 5. Migration Details
+- Generated Migration: `20261013113448_AddXpTransactionsLedger.cs` in `MOT.Infrastructure/Migrations`.
+- Schema changes isolated to creating table `XpTransactions` and its 2 indexes. No modifications to other tables.
+- Model snapshot verified: `dotnet ef migrations has-pending-model-changes` reports 0 pending changes.
+- **Remote DB Protection:** Strict constraint honored — `dotnet ef database update` was NOT run. The live database was NOT modified.
+- Existing pending migrations preserved unchanged:
+  1. `20261012110919_FixStudySessionActiveUserIdColumn`
+  2. `20261012121819_AddRoomParticipantConstraints`
+  3. `20261012175608_AddUniqueIndexToHabitCompletions`
+  4. `20261013113448_AddXpTransactionsLedger` (newly scaffolded)
+
+### 6. Build and Test Verification
+- **Backend Build:** `dotnet build MOT.Api/MOT.Api.csproj` -> **0 Errors, 0 Warnings**.
+- **Backend Test Suite:** `dotnet test MOT.Tests/MOT.Tests.csproj` -> **318/318 passed (100%)** (+64 new tests added in `LevelCalculatorTests.cs` and `XpLedgerTests.cs`).
+  - Unit tests verify: 0 XP, negative XP, threshold calculations, exact boundaries (99/100, 299/300, 599/600), progress fractions (0%, 50%, 99.5%), large XP and `int.MaxValue` overflow safety, entity property defaults, and EF Core cascade delete / composite unique index metadata.
+- **Frontend Test Suite:** `flutter test` -> **24/24 passed (100%)**.
+
+### 7. Completed Phase 6.2 Implementation
+See detailed Phase 6.2 implementation details below.
+
+## Phase 6.2 — XP Award Service and Handler Integration
+
+**Status: IMPLEMENTATION & VERIFICATION COMPLETE**
+
+Phase 6.2 integrated the gamification XP award pipeline with core activity completion workflows (`StudySessions`, `DailyTasks`, and `Habits`) while guaranteeing atomic relational commits, deduplication, MariaDB Error 1062 collision recovery, and concurrency safety.
+
+### 1. Architectural Components
+- **`GamificationOptions` (`MOT.Application.Gamification.GamificationOptions`):**
+  - Configurable server-side award parameters:
+    - `TaskCompletionXp = 15`
+    - `HabitCompletionXp = 20`
+    - `StudySessionMinMinutes = 5`
+    - `StudySessionBaseXp = 10`
+    - `StudySessionMinutesPerXp = 2`
+    - `StudySessionMaxXp = 70`
+  - Registered via ASP.NET Core `IOptions<GamificationOptions>` in `Program.cs`.
+- **`XpAwardResult` (`MOT.Application.Gamification.XpAwardResult`):**
+  - Strongly-typed immutable record returned by award methods:
+    - `Awarded`: Boolean indicating whether XP was newly awarded.
+    - `Amount`: Integer XP amount staged.
+    - `NewTotalXp`: Updated user XP balance.
+    - `NewLevel`: Updated user level according to `LevelCalculator`.
+    - `AlreadyAwarded`: Boolean flag indicating idempotency deduplication triggered.
+    - `Reason`: Explanatory message for non-eligibility or duplicate state.
+- **`UserConcurrencyLock` (`MOT.Application.Common.UserConcurrencyLock`):**
+  - Thread-safe in-memory `SemaphoreSlim` registry keyed by `Guid UserId`.
+  - Serializes concurrent awards for the same user, preventing lost updates on `user.XP` and `user.Level` while permitting completely parallel execution across different users.
+- **`IGamificationService` & `GamificationService` (`MOT.Application.Gamification`):**
+  - Registered as `Scoped` dependency in `MOT.Api/Program.cs`.
+  - Encapsulates authoritative award formulas, validation, deduplication checks, and ledger staging.
+  - Implements integer overflow protection: throws `OverflowException` if `(long)user.XP + amount > int.MaxValue`.
+  - Implements `IsXpDuplicateCollision(DbUpdateException ex)` to identify MariaDB Error 1062 collisions on `IX_XpTransactions_UserId_SourceType_SourceId`.
+  - Implements `HandleDuplicateCollision(Guid userId, string sourceType, string sourceId)`: safely detaches unpersisted `XpTransaction` entities from EF Core ChangeTracker and calls `userEntry.Reload()`.
+
+### 2. Activity Award Formulas & Integration
+1. **Study Sessions (`EndStudySessionCommandHandler`):**
+   - Duration $< 5$ minutes: 0 XP (ineligible).
+   - Duration $\ge 5$ minutes: Formula $10 + \lfloor\text{duration} / 2\rfloor$, capped at 70 XP ($5\text{m} \rightarrow 12\text{ XP}, 25\text{m} \rightarrow 22\text{ XP}, 50\text{m} \rightarrow 35\text{ XP}, 120\text{m} \rightarrow 70\text{ XP}, 180\text{m} \rightarrow 70\text{ XP}$).
+   - Idempotency key: `(UserId, "STUDYSESSION", SessionId)`.
+   - Re-ending an already completed session is a safe no-op with 0 XP awarded and zero duplicate database writes.
+2. **Daily Tasks (`ToggleTaskCommandHandler`):**
+   - First completion (`task.IsCompleted = true`): 15 XP awarded.
+   - Idempotency key: `(UserId, "TASK", TaskId)`.
+   - Unchecking task (`task.IsCompleted = false`): 0 XP awarded/deducted, completion status updated.
+   - Re-checking task (`task.IsCompleted = true`): 0 XP awarded (duplicate detected via ledger), completion status updated.
+3. **Habits (`ToggleHabitCompletionCommandHandler`):**
+   - First daily completion: 20 XP awarded.
+   - Idempotency key: `(UserId, "HABIT", $"{HabitId}:{Date:yyyy-MM-dd}")`.
+   - Untoggling habit completion today: 0 XP deducted, completion record removed.
+   - Re-toggling habit completion today: 0 XP awarded (duplicate detected via date-scoped idempotency key), completion record added.
+   - Completion on subsequent day ($D+1$): new idempotency key generated, awards 20 XP.
+   - Streak bonuses: deferred to Phase 6.3 per design specifications.
+
+### 3. Relational Atomicity & Concurrency Collision Safety
+- **Single Commit Atomicity:** Activity status (`session.IsCompleted`, `task.IsCompleted`, `HabitCompletion`) and XP ledger mutation (`XpTransaction`, `user.XP`, `user.Level`) are staged together in the same DbContext ChangeTracker and committed via a single `SaveChangesAsync(cancellationToken)` call.
+- **MariaDB Error 1062 Detection:** Handler exception filters inspect both inner and outer exception messages for error number 1062 and index name `IX_XpTransactions_UserId_SourceType_SourceId`.
+- **ChangeTracker Cleanliness:** On collision, candidate `XpTransaction` entities are transitioned to `EntityState.Detached`, and the user entity is reloaded from the database, preventing dirty state propagation.
+
+### 4. Build and Test Verification
+- **Backend Build:** `dotnet build MOT.Api/MOT.Api.csproj` -> **0 Errors, 0 Warnings**.
+- **Backend Test Suite:** `dotnet test MOT.Tests/MOT.Tests.csproj` -> **346/346 passed (100%)**:
+  - 318 existing baseline tests.
+  - 28 new tests in `GamificationServiceTests.cs` verifying:
+    - Study session duration formula boundaries (0m, 4m, 5m, 25m, 50m, 120m, 180m cap).
+    - Session incomplete / uncompleted validation.
+    - Safe no-op on re-ending completed sessions.
+    - Daily task first award (+15 XP), uncheck (0 XP), recheck (0 XP duplicate).
+    - Habit daily award (+20 XP), untoggle (0 XP), retoggle (0 XP duplicate), next day award (+20 XP).
+    - Balance overflow protection (`int.MaxValue`).
+    - Error 1062 collision identification and unrelated constraint isolation.
+    - End-to-end atomic completions across all three command handlers.
+    - Thread-safe serialization with `UserConcurrencyLock`.
+- **Frontend Test Suite:** `flutter test` -> **24/24 passed (100%)**.
+- **EF Model Snapshot Check:** `dotnet ef migrations has-pending-model-changes` -> **0 pending model changes**.
+- **Remote DB Protection:** Strict constraint honored — no migrations applied to remote production database.
+
+### 5. Remaining Work for Next Subphases
+- **Phase 6.3 — Achievement Catalog & Evaluation Engine:**
+  - In-code catalog of 8 achievements in `MOT.Domain.Gamification`.
+  - `UserAchievement` entity configuration and schema foundation.
+  - Asynchronous evaluation pipeline on activity completion events.
+  - Streak milestone evaluations and bonus awards.
+- **Phase 6.4 — Gamification API & Controllers:**
+  - `GamificationController` (`summary`, `achievements`, `history`).
+  - DTOs, queries, and integration tests.
+- **Phase 6.5 — Flutter Client Gamification Integration:**
+  - Progress bar in `ProfileScreen`, `AchievementsScreen`, Riverpod state management.
+
+## Phase 6.2 Final Transaction and Concurrency Audit
+
+**Status: AUDIT & REGRESSION HARDENING COMPLETE**
+
+A rigorous, end-to-end transaction boundary and concurrency safety audit was conducted on the completed Phase 6.2 XP award integration.
+
+### 1. Transaction Boundaries & Atomicity Proof
+- **Single Unit of Work:** For Study Sessions, Daily Tasks, and Habits, activity completion status mutations, XP ledger transaction insertions, `User.XP` increments, and `User.Level` updates are staged in the same `DbContext` ChangeTracker and committed via a single `await _context.SaveChangesAsync(cancellationToken)` call.
+- **MariaDB Relational Guarantees:** EF Core executes the batch inside an implicit database transaction. If any statement or constraint fails, MariaDB executes an atomic rollback (`ROLLBACK`).
+  - An activity cannot be marked completed without its corresponding XP award persisting.
+  - XP cannot be awarded for an activity that fails to persist.
+- **Pre-Persistence Exception Safety:** If an exception occurs during award calculation (e.g., `OverflowException` or entity validation failure), the handler terminates before calling `SaveChangesAsync`. All in-memory modifications remain uncommitted, preserving complete database integrity.
+
+### 2. Concurrency Analysis: Single-Process vs. Multi-Instance
+- **Single-Process Guarantee:** Within a single API process, `UserConcurrencyLock` (`ConcurrentDictionary<Guid, SemaphoreSlim>`) guarantees strict FIFO serialization for all concurrent requests targeting the same `UserId`.
+  - The lock is acquired via `using (await UserConcurrencyLock.LockAsync(userId, cancellationToken))` before reading or modifying user state.
+  - The `IDisposable` releaser ensures release upon both normal completion and exceptions.
+- **Multi-Instance / Distributed Limitation Documented:**
+  - In a multi-instance (horizontally scaled) environment, separate application instances maintain independent in-memory lock dictionaries.
+  - If two instances simultaneously process awards for the same user (e.g. Instance 1 completes Task 1, Instance 2 completes Session 1), both read the initial `User.XP` (e.g. 100).
+  - EF Core generates `UPDATE Users SET XP = @newVal WHERE Id = @userId` (setting absolute values, not relative increments `XP = XP + @delta`).
+  - While InnoDB row-level locks serialize the writes, the second commit overwrites the first, resulting in a **lost update** of the earlier award on `User.XP` (even though both `XpTransaction` rows persist in the ledger).
+  - *Future Distributed Scaling Path:* When multi-instance deployment is introduced, this must be addressed via distributed locking (e.g., MariaDB `GET_LOCK` or Redis distributed locks) or an EF Core concurrency token with automated reload-and-retry.
+  - *Current MVP Architecture:* The application operates on a single hosted API instance, where `UserConcurrencyLock` provides complete thread-safety.
+
+### 3. Duplicate-Key Recovery & ChangeTracker Cleanliness
+- **Error 1062 Specificity:** `IsXpDuplicateCollision` specifically targets MariaDB Error 1062 on `IX_XpTransactions_UserId_SourceType_SourceId`.
+- **Unrelated Errors Propagate:** Unrelated unique constraints (e.g., `IX_Users_Email`, `IX_RoomParticipants_RoomName_SeatNumber`), foreign key errors (1452), deadlocks (1213), and connection errors (2002) return `false` from `IsXpDuplicateCollision` and propagate cleanly.
+- **ChangeTracker Recovery:**
+  - In `HandleDuplicateCollision`, unpersisted `XpTransaction` entities are set to `EntityState.Detached`.
+  - Tracked `User` entities are reloaded via `userEntry.Reload()`, restoring the persisted database balance.
+  - In `EndStudySessionCommand` and `ToggleTaskCommand`, the respective activity entities are reloaded via `Reload()` on collision to synchronize in-memory state with the winning concurrent transaction.
+
+### 4. XP Integrity & Validation Hardening
+- **Zero & Negative XP Protection:** `StageXpAwardInternalAsync` rejects amounts $\le 0$, returning `NotEligible` and preventing misleading or corrupting ledger entries.
+- **Argument Guards:** Non-empty validation enforced for `sourceType` and `sourceId`.
+- **Direct Award Serialization:** `AwardXpDirectAsync` wrapped in `UserConcurrencyLock` to ensure consistent serialization across all entry points.
+- **Level Recalculation:** `User.Level` is synchronized immediately with `LevelCalculator.CalculateLevel(user.XP)` on every balance mutation.
+
+### 5. Verification & Test Suite Summary
+- **Backend Build:** `dotnet build MOT.Api/MOT.Api.csproj` -> **0 Errors, 0 Warnings**.
+- **Backend Test Suite:** `dotnet test MOT.Tests/MOT.Tests.csproj` -> **368/368 passed (100%)** (+22 new tests covering direct awards, unrelated DB error propagation, failure before persistence, and multi-event concurrent awards).
+- **Frontend Test Suite:** `flutter test` -> **24/24 passed (100%)**.
+- **EF Model Snapshot Check:** `dotnet ef migrations has-pending-model-changes` -> **0 pending model changes**.
+- **Remote DB Protection:** Strict constraint honored — remote database was never connected to or modified.
+
+## Phase 6.3 — Achievement Catalog and Evaluation Engine
+
+**Status: IMPLEMENTATION COMPLETE — VERIFIED**
+
+Phase 6.3 implemented the deterministic achievement catalog, `UserAchievement` persistence model and migration, and the asynchronous activity evaluation pipeline across study sessions, tasks, and habits.
+
+### 1. Architecture & Core Components
+
+- **Achievement Definitions & Catalog (`MOT.Domain.Gamification`):**
+  - `AchievementCodes`: Strongly-typed string constants for all 8 launch achievements.
+  - `AchievementDefinition`: Immutable domain record containing `Code`, `Title`, `Description`, `IconName`, and `XpReward`.
+  - `AchievementCatalog`: Centralized deterministic catalog exposing `All`, `GetByCode(code)`, and `Contains(code)`.
+  - Defined initial achievements:
+    1. `FIRST_STEP`: "Complete your first daily task" (+25 XP)
+    2. `FOCUS_INITIATE`: "Complete your first study session of at least 15 minutes" (+25 XP)
+    3. `HABIT_STARTER`: "Complete your first habit" (+25 XP)
+    4. `CENTURY_CLUB`: "Reach 100 total minutes of completed focus time" (+50 XP)
+    5. `DEEP_DIVER`: "Complete a single focus session of at least 60 minutes" (+50 XP)
+    6. `STREAK_BUILDER`: "Reach a 3-day streak on any habit" (+50 XP)
+    7. `UNSTOPPABLE`: "Reach a 7-day streak on any habit" (+100 XP)
+    8. `TASK_MASTER`: "Complete 10 distinct daily tasks" (+75 XP)
+- **`UserAchievement` Entity & Schema Foundation (`MOT.Domain.Entities`, `MOT.Infrastructure`):**
+  - Entity attributes: `Id` (Guid PK), `UserId` (Guid FK -> Users), `User` navigation, `AchievementCode` (varchar 50), `UnlockedAt` (DateTime UTC), `XpAwarded` (int).
+  - Configured cascade delete on User deletion.
+  - Unique composite index: `IX_UserAchievements_UserId_AchievementCode` on `(UserId, AchievementCode)` guaranteeing at-most-once unlock per user.
+  - Performance index: `IX_UserAchievements_UserId_UnlockedAt` on `(UserId, UnlockedAt)`.
+  - Scaffolded EF Core migration: `20261013145328_AddUserAchievementsTable.cs` with 0 pending model changes. (Strict constraint honored: migration was NOT applied to remote database).
+- **Deadlock-Free Staged XP (`IGamificationService.StageAchievementXpAsync`):**
+  - Command handlers acquire `UserConcurrencyLock.LockAsync(userId)`.
+  - `AchievementService` and `StageAchievementXpAsync` do NOT reacquire `UserConcurrencyLock`, preventing deadlocks on non-reentrant `SemaphoreSlim`.
+  - Stages `XpTransaction` with `SourceType = XpSourceTypes.Achievement` and `SourceId = achievementCode`, updates `User.XP` and `User.Level` in-memory.
+- **`IAchievementService` & `AchievementService` (`MOT.Application.Gamification`):**
+  - Registered as `Scoped` in `MOT.Api/Program.cs`.
+  - Inspects both database records and current EF ChangeTracker (`ChangeTracker.Entries<XpTransaction>()`, `ChangeTracker.Entries<HabitCompletion>()`) to account for activity completion in the active transaction before `SaveChangesAsync`.
+  - Evaluates and unlocks achievements without re-awarding previously unlocked achievements (idempotency check via `GetUnlockedAchievementCodesAsync`).
+  - MariaDB Error 1062 detection: `IsAchievementDuplicateCollision(DbUpdateException ex)` recognizes collisions on `IX_UserAchievements_UserId_AchievementCode` and `UserAchievements`.
+  - Collision recovery: `HandleDuplicateCollision` detaches candidate `UserAchievement` entries, detaches associated `XpTransaction` entries, and reloads `User`.
+- **Command Handler Integration:**
+  - `EndStudySessionCommand`: evaluates `FOCUS_INITIATE`, `DEEP_DIVER`, `CENTURY_CLUB`.
+  - `ToggleTaskCommand`: evaluates `FIRST_STEP`, `TASK_MASTER` (distinct task tracking).
+  - `ToggleHabitCompletionCommand`: evaluates `HABIT_STARTER`, `STREAK_BUILDER`, `UNSTOPPABLE` using `HabitStreakCalculator`.
+  - Extended catch filters in all 3 handlers to handle both `IsXpDuplicateCollision` and `IsAchievementDuplicateCollision`.
+
+### 2. Relational Atomicity & Single Commit Guarantees
+
+- **Single Unit of Work:** The activity status update (`session`, `task`, or `habitCompletion`), activity base XP transaction, `UserAchievement` record(s), achievement XP transaction(s), `user.XP`, and `user.Level` are staged in the same ChangeTracker and committed together via the handler's single `await _context.SaveChangesAsync(cancellationToken)` call.
+- All-or-nothing rollback: If any achievement fails or a database constraint fails, MariaDB rolls back the entire batch.
+
+### 3. Verification & Test Suite Summary
+
+- **Backend Build:** `dotnet build MOT.Api/MOT.Api.csproj` -> **0 Errors, 0 Warnings**.
+- **Backend Test Suite:** `dotnet test MOT.Tests/MOT.Tests.csproj` -> **422/422 passed (100%)**:
+  - 368 existing baseline tests.
+  - 6 new tests in `AchievementCatalogTests.cs` (catalog count, all 8 definitions, case-insensitivity, null/empty safety, total XP reward sum = 400).
+  - 24 new tests in `AchievementServiceTests.cs` covering:
+    - Study session thresholds (<15m, 15m, 60m, cumulative 100m, 99m boundary, uncompleted session, idempotency).
+    - Task completions (0 tasks, 1 task, duplicate toggles of same task, 9 distinct tasks boundary, 10 distinct tasks, idempotency).
+    - Habit completions and streak milestones (0 completions, 1st completion, streak 2 days boundary, streak 3 days, streak 6 days boundary, streak 7 days, idempotency).
+    - Error handling, user not found, Error 1062 collision filter isolation, and mock context recovery safety.
+  - Existing handlers updated in `StudySessionHandlerTests.cs`, `TaskHandlerTests.cs`, `HabitHandlerTests.cs`, and `GamificationServiceTests.cs`.
+- **Frontend Test Suite:** `flutter test` -> **24/24 passed (100%)**.
+- **EF Model Snapshot Check:** `dotnet ef migrations has-pending-model-changes` -> **0 pending model changes**.
+- **Remote DB Protection:** Strict constraint honored — remote database was never connected to or modified; migrations were not applied to remote DB.
+
+### 4. Remaining Work for Next Subphases
+
+- **Phase 6.4 — Gamification API & Controllers:** Completed.
+- **Phase 6.5 — Flutter Client Gamification Integration:**
+  - Progress bar in `ProfileScreen`, `AchievementsScreen`, Riverpod state management.
+
+## Phase 6.4 — Gamification API and Controllers
+
+**Status: IMPLEMENTATION COMPLETE — VERIFIED**
+
+Phase 6.4 implemented read-only, authenticated Gamification API endpoints, MediatR queries and handlers, DTOs, FluentValidation rules, and unit/controller tests.
+
+### 1. Endpoints & Response Contracts
+
+All endpoints are hosted under `GamificationController` (`api/gamification`) with `[Authorize]` and `[EnableCors("AllowAll")]`:
+
+1. **`GET /api/gamification/summary`**
+   - Returns the authenticated user's current progress calculated strictly via `LevelCalculator`:
+     ```json
+     {
+       "level": 2,
+       "totalXp": 250,
+       "currentLevelThresholdXp": 100,
+       "nextLevelThresholdXp": 300,
+       "xpEarnedInCurrentLevel": 150,
+       "xpRequiredForNextLevel": 200,
+       "progressFraction": 0.75,
+       "progressPercentage": 75.0,
+       "totalAchievements": 8,
+       "unlockedAchievements": 3
+     }
+     ```
+2. **`GET /api/gamification/achievements`**
+   - Returns the complete 8-achievement catalog from `AchievementCatalog.All`, joining against the authenticated user's unlock records:
+     ```json
+     [
+       {
+         "code": "FIRST_STEP",
+         "title": "First Step",
+         "description": "Complete your first daily task",
+         "iconName": "check_circle",
+         "xpReward": 25,
+         "isUnlocked": true,
+         "unlockedAt": "2026-10-13T12:00:00Z"
+       },
+       {
+         "code": "FOCUS_INITIATE",
+         "title": "Focus Initiate",
+         "description": "Complete your first study session of at least 15 minutes",
+         "iconName": "timer",
+         "xpReward": 25,
+         "isUnlocked": false,
+         "unlockedAt": null
+       }
+     ]
+     ```
+3. **`GET /api/gamification/history?limit=20`**
+   - Returns recent XP ledger entries for the authenticated user, newest first (`CreatedAt DESC, Id DESC`):
+     ```json
+     [
+       {
+         "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+         "amount": 25,
+         "sourceType": "ACHIEVEMENT",
+         "description": "Unlocked achievement: First Step",
+         "createdAt": "2026-10-13T12:00:00Z"
+       }
+     ]
+     ```
+
+### 2. Validation & Security
+
+- **User Scoping:** The user ID is exclusively resolved from `ICurrentUserService.UserId`. Client-supplied user IDs in query parameters or request bodies are strictly rejected/ignored.
+- **Limit Validation:** Query parameter `limit` on `/history` is validated via `GetXpHistoryQueryValidator` (`InclusiveBetween(1, 100)`). Invalid limits return HTTP 400 Bad Request with standardized error details. Default limit is 20.
+- **Read-Only Guarantees:** All queries execute with `AsNoTracking()` where applicable and never perform mutations, stage transactions, or call `SaveChangesAsync`.
+- **Concurrency & Scaling Limitation:** Read queries do not require `UserConcurrencyLock`. The documented limitation that `UserConcurrencyLock` is in-process remains preserved for award commands.
+
+### 3. Verification & Test Suite Summary
+
+- **Backend API Build:** `dotnet build backend/MOT.Api/MOT.Api.csproj` -> **0 Errors, 0 Warnings**.
+- **Backend Test Suite:** `dotnet test backend/MOT.Tests/MOT.Tests.csproj` -> **462/462 passed (100%)**:
+  - 422 baseline tests.
+  - 40 new tests in `GamificationApiTests.cs` covering:
+    - Summary for new user with 0 XP (Level 1, 0% progress, 0 unlocked achievements).
+    - Summary at exact level threshold boundaries and with partial progress.
+    - User scoping and isolation across all queries.
+    - Complete catalog mapping including locked achievements and unlock timestamps.
+    - Empty history handling and newest-first chronological ordering.
+    - History limit boundaries and validation rejection of invalid limits (<= 0 or > 100).
+    - Read requests never mutating state or invoking `SaveChangesAsync`.
+    - Missing user (`UserNotFoundException` -> 404) and unauthenticated (`UnauthorizedAccessException` -> 401).
+    - Controller HTTP status codes (200, 400, 401, 404, 500) and attribute configurations.
+- **Frontend Test Suite:** `flutter test` -> **24/24 passed (100%)**.
+- **EF Model Snapshot Check:** `dotnet ef migrations has-pending-model-changes` -> **0 pending model changes**.
+- **Remote DB Protection:** Strict constraint honored — remote database was never connected to or modified; migrations were not applied to remote DB.
+
+### 4. Phase 6.5 — Flutter Gamification UI Integration
+
+**Status: IMPLEMENTATION & VERIFICATION COMPLETE**
+
+A complete Flutter UI integration was implemented for the Gamification subsystem, consuming the backend endpoints (`GET /api/gamification/summary`, `GET /api/gamification/achievements`, `GET /api/gamification/history?limit=20`) without modifying backend business logic or database schemas.
+
+#### 1. Data Models (`frontend/lib/features/gamification/data/models/`)
+- `GamificationSummary`: parses `level`, `totalXp`, `currentLevelThresholdXp`, `nextLevelThresholdXp`, `xpEarnedInCurrentLevel`, `xpRequiredForNextLevel`, `progressFraction` (clamped to `[0.0, 1.0]`), `progressPercentage`, `totalAchievements`, `unlockedAchievements`. Includes defensive numeric fallbacks for `int` and `double` parsing.
+- `AchievementItem`: parses `code`, `title`, `description`, `iconName`, `xpReward`, `isUnlocked`, `unlockedAt` (`DateTime?`).
+- `XpTransactionItem`: parses `id`, `amount`, `sourceType`, `description`, `createdAt` (`DateTime`).
+
+#### 2. Repository & Riverpod Providers (`frontend/lib/features/gamification/`)
+- `GamificationRepository`:
+  - `getSummary()`: queries `GET /api/gamification/summary`.
+  - `getAchievements()`: queries `GET /api/gamification/achievements`.
+  - `getHistory({int limit = 20})`: queries `GET /api/gamification/history?limit=20`.
+  - Robust exception handling extracting server error `message` and formatting network/timeout failures.
+- Riverpod Providers (`gamification_providers.dart`):
+  - `gamificationRepositoryProvider`: provides singleton `GamificationRepository`.
+  - `gamificationSummaryProvider`: `FutureProvider` auto-fetching authenticated gamification summary.
+  - `achievementsProvider`: `FutureProvider` auto-fetching achievement catalog with unlock statuses.
+  - `xpHistoryProvider`: `FutureProvider` auto-fetching recent 20 XP transactions.
+
+#### 3. UI Screens & Components
+- **`ProfileScreen` (`frontend/lib/features/profile/presentation/screens/profile_screen.dart`):**
+  - **Level Progress Card:** Displays current level badge, total XP, current progress fraction (`LinearProgressIndicator`), and XP remaining to next level (`earnedInLevel / requiredForNext XP`), sourced authoritatively from `gamificationSummaryProvider` (with graceful fallback to `profile.level`/`profile.xp` while loading).
+  - **Quick Stat Cards:** Retains existing Focus Minutes and Current Streak stats.
+  - **Achievements Navigation Tile:** Displays unlocked count badge (`X / Y Unlocked`) with trophy icon, navigating smoothly to `AchievementsScreen`.
+  - **Recent XP Activity Section:** Renders list of recent XP ledger entries showing date, award amount (`+X XP`), source icon (`TASK`, `HABIT`, `STUDYSESSION`, `ACHIEVEMENT`), and description, with clean empty and error states.
+  - **Pull-to-Refresh & Invalidation:** Invalidation hooks for `gamificationSummaryProvider` and `xpHistoryProvider` on refresh and user logout.
+- **`AchievementsScreen` (`frontend/lib/features/gamification/presentation/screens/achievements_screen.dart`):**
+  - Dedicated screen displaying all 8 achievements from the catalog.
+  - **Progress Summary Banner:** Shows `Unlocked X of Y` and completion percentage with gradient visual card.
+  - **Achievement Cards:** Rich card layout for unlocked vs locked achievements (gold tint & highlight for unlocked; dimmed with lock indicator for locked).
+  - **Safe Icon Mapping:** Resolves catalog icon names (`check_circle`, `timer`, `repeat`, `flag`, `trophy`, `award`, `stars`) to Material icons, with a safe fallback to `Icons.emoji_events_rounded` for any unknown icon names.
+  - **Timestamp & XP Reward Display:** Shows unlock date for unlocked badges, XP reward tag (`+X XP`), title, and description.
+  - **Empty and Error States:** Full empty state banner and error state with retry button.
+
+#### 4. Verification & Test Suite Summary
+- **Frontend Test Suite:** `flutter test` -> **52/52 passed (100%)**:
+  - 18 unit tests in `gamification_model_and_repository_test.dart` (models parsing, fallbacks, repo calls, error surfacing, parameter passing).
+  - 10 widget & provider tests in `gamification_ui_and_provider_test.dart` (`ProfileScreen` level card, achievements navigation, history list, empty states, error retry, `AchievementsScreen` progress banner, icon fallbacks).
+  - 24 existing tests across auth, analytics, habits, timers, classroom smoke tests.
+- **Frontend Static Analysis:** `flutter analyze --no-fatal-infos` -> **0 errors, 0 warnings** in new and updated files.
+- **Backend Test Suite:** `dotnet test backend/MOT.Tests/MOT.Tests.csproj` -> **462/462 passed (100%)**.
+- **EF Model Snapshot Check:** `dotnet ef migrations has-pending-model-changes` -> **0 pending model changes**.
+- **Remote DB Protection:** Strict constraint honored — remote database was never connected to or modified; no migrations applied.
 

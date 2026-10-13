@@ -15,6 +15,8 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<HabitCompletion> HabitCompletions { get; set; }
     public DbSet<StudySession> StudySessions { get; set; }
     public DbSet<RoomParticipant> RoomParticipants { get; set; }
+    public DbSet<XpTransaction> XpTransactions { get; set; }
+    public DbSet<UserAchievement> UserAchievements { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -76,6 +78,64 @@ public class AppDbContext : DbContext, IAppDbContext
                   .OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(e => new { e.HabitId, e.Date })
                   .IsUnique();
+        });
+
+        modelBuilder.Entity<XpTransaction>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade)
+                  .IsRequired();
+
+            entity.Property(e => e.SourceType)
+                  .HasMaxLength(32)
+                  .IsRequired();
+
+            entity.Property(e => e.SourceId)
+                  .HasMaxLength(64)
+                  .IsRequired();
+
+            entity.Property(e => e.Description)
+                  .HasMaxLength(200)
+                  .IsRequired();
+
+            entity.Property(e => e.Amount)
+                  .IsRequired();
+
+            entity.Property(e => e.CreatedAt)
+                  .IsRequired();
+
+            entity.HasIndex(e => new { e.UserId, e.SourceType, e.SourceId })
+                  .IsUnique();
+
+            entity.HasIndex(e => new { e.UserId, e.CreatedAt });
+        });
+
+        modelBuilder.Entity<UserAchievement>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade)
+                  .IsRequired();
+
+            entity.Property(e => e.AchievementCode)
+                  .HasMaxLength(64)
+                  .IsRequired();
+
+            entity.Property(e => e.UnlockedAt)
+                  .IsRequired();
+
+            entity.Property(e => e.XpAwarded)
+                  .IsRequired();
+
+            entity.HasIndex(e => new { e.UserId, e.AchievementCode })
+                  .IsUnique();
+
+            entity.HasIndex(e => new { e.UserId, e.UnlockedAt });
         });
     }
 }

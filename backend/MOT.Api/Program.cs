@@ -12,6 +12,7 @@ using MOT.Application.Common.Interfaces;
 using MOT.Application.Common.Behaviors;
 using MediatR;
 using MOT.Api.Services;
+using MOT.Application.Gamification;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -73,6 +74,9 @@ builder.Services.AddScoped<IJwtProvider, JwtProvider>();
 builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+builder.Services.AddScoped<IGamificationService, GamificationService>();
+builder.Services.AddScoped<IAchievementService, AchievementService>();
+builder.Services.Configure<GamificationOptions>(builder.Configuration.GetSection("Gamification"));
 
 builder.Services.AddMediatR(cfg =>
 {

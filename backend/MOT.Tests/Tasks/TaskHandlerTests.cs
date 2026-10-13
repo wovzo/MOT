@@ -11,6 +11,7 @@ using Moq;
 using MOT.Api.Controllers;
 using MOT.Application.Common.Exceptions;
 using MOT.Application.Common.Interfaces;
+using MOT.Application.Gamification;
 using MOT.Application.Tasks.Commands;
 using MOT.Application.Tasks.Queries;
 using MOT.Domain.Entities;
@@ -23,6 +24,8 @@ public class TaskHandlerTests
 {
     private readonly Mock<IAppDbContext> _dbContextMock;
     private readonly Mock<ICurrentUserService> _currentUserServiceMock;
+    private readonly Mock<IGamificationService> _gamificationServiceMock;
+    private readonly Mock<IAchievementService> _achievementServiceMock;
     private readonly List<DailyTask> _tasks;
 
     public TaskHandlerTests()
@@ -30,6 +33,8 @@ public class TaskHandlerTests
         _tasks = new List<DailyTask>();
         _dbContextMock = new Mock<IAppDbContext>();
         _currentUserServiceMock = new Mock<ICurrentUserService>();
+        _gamificationServiceMock = new Mock<IGamificationService>();
+        _achievementServiceMock = new Mock<IAchievementService>();
 
         var mockTasksDbSet = MockDbSetHelper.CreateMockDbSet(_tasks);
 
@@ -278,7 +283,7 @@ public class TaskHandlerTests
         };
         _tasks.Add(task);
 
-        var handler = new ToggleTaskCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new ToggleTaskCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
 
         // Act
         var result = await handler.Handle(new ToggleTaskCommand(task.Id), CancellationToken.None);
@@ -305,7 +310,7 @@ public class TaskHandlerTests
         };
         _tasks.Add(task);
 
-        var handler = new ToggleTaskCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new ToggleTaskCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
 
         // Act
         var result = await handler.Handle(new ToggleTaskCommand(task.Id), CancellationToken.None);
@@ -323,7 +328,7 @@ public class TaskHandlerTests
         var userId = Guid.NewGuid();
         _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
 
-        var handler = new ToggleTaskCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new ToggleTaskCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
 
         // Act
         Func<Task> act = async () => await handler.Handle(new ToggleTaskCommand(Guid.NewGuid()), CancellationToken.None);
@@ -349,7 +354,7 @@ public class TaskHandlerTests
         };
         _tasks.Add(otherUserTask);
 
-        var handler = new ToggleTaskCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new ToggleTaskCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
 
         // Act
         Func<Task> act = async () => await handler.Handle(new ToggleTaskCommand(otherUserTask.Id), CancellationToken.None);
@@ -368,7 +373,7 @@ public class TaskHandlerTests
     {
         // Arrange
         _currentUserServiceMock.Setup(s => s.UserId).Returns(invalidUserId);
-        var handler = new ToggleTaskCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new ToggleTaskCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
 
         // Act
         Func<Task> act = async () => await handler.Handle(new ToggleTaskCommand(Guid.NewGuid()), CancellationToken.None);

@@ -3,6 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../auth/presentation/screens/login_screen.dart';
+import '../../../gamification/data/models/gamification_summary.dart';
+import '../../../gamification/data/models/xp_transaction_item.dart';
+import '../../../gamification/presentation/providers/gamification_providers.dart';
+import '../../../gamification/presentation/screens/achievements_screen.dart';
 import '../../data/models/user_profile.dart';
 import 'settings_screen.dart';
 
@@ -13,6 +17,10 @@ class ProfileScreen extends ConsumerWidget {
     final repo = ref.read(authRepositoryProvider);
     await repo.logout();
     ref.read(authStateProvider.notifier).state = false;
+    ref.invalidate(userProfileProvider);
+    ref.invalidate(gamificationSummaryProvider);
+    ref.invalidate(achievementsProvider);
+    ref.invalidate(xpHistoryProvider);
     if (context.mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -24,8 +32,11 @@ class ProfileScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profileAsync = ref.watch(userProfileProvider);
+    final summaryAsync = ref.watch(gamificationSummaryProvider);
+    final historyAsync = ref.watch(xpHistoryProvider);
 
     return Scaffold(
+      backgroundColor: AppTheme.midnightBase,
       appBar: AppBar(
         title: const Text('Profile'),
         backgroundColor: Colors.transparent,
@@ -63,7 +74,11 @@ class ProfileScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: 16),
                 ElevatedButton.icon(
-                  onPressed: () => ref.refresh(userProfileProvider),
+                  onPressed: () {
+                    ref.invalidate(userProfileProvider);
+                    ref.invalidate(gamificationSummaryProvider);
+                    ref.invalidate(xpHistoryProvider);
+                  },
                   icon: const Icon(Icons.refresh_rounded),
                   label: const Text('Retry'),
                   style: ElevatedButton.styleFrom(
@@ -75,7 +90,15 @@ class ProfileScreen extends ConsumerWidget {
           ),
         ),
         data: (profile) => RefreshIndicator(
-          onRefresh: () => ref.refresh(userProfileProvider.future),
+          onRefresh: () async {
+            ref.invalidate(userProfileProvider);
+            ref.invalidate(gamificationSummaryProvider);
+            ref.invalidate(achievementsProvider);
+            ref.invalidate(xpHistoryProvider);
+            try {
+              await ref.read(userProfileProvider.future);
+            } catch (_) {}
+          },
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.all(24.0),
@@ -96,21 +119,25 @@ class ProfileScreen extends ConsumerWidget {
                   profile.email,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white54),
                 ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppTheme.focusPurple.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    'Level ${profile.level} • ${profile.xp} XP',
-                    style: const TextStyle(color: AppTheme.focusPurple, fontWeight: FontWeight.w600, fontSize: 13),
-                  ),
-                ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
+
+                // 1. Authoritative Level Progress Card
+                _buildLevelProgressCard(context, profile, summaryAsync),
+                const SizedBox(height: 20),
+
+                // 2. Quick Stat Cards (Streak & Total Focus)
                 _buildStatCards(profile),
-                const SizedBox(height: 40),
+                const SizedBox(height: 20),
+
+                // 3. Achievements Navigation Card
+                _buildAchievementsCard(context, summaryAsync),
+                const SizedBox(height: 24),
+
+                // 4. Recent XP History Section
+                _buildRecentXpSection(context, historyAsync),
+                const SizedBox(height: 36),
+
+                // 5. Logout Button
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
@@ -132,6 +159,320 @@ class ProfileScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  Widget _buildLevelProgressCard(
+    BuildContext context,
+    UserProfile profile,
+    AsyncValue<GamificationSummary> summaryAsync,
+  ) {
+    final int level = summaryAsync.valueOrNull?.level ?? profile.level;
+    final int totalXp = summaryAsync.valueOrNull?.totalXp ?? profile.xp;
+    final double fraction = (summaryAsync.valueOrNull?.progressFraction ?? 0.0).clamp(0.0, 1.0);
+    final double percentage = summaryAsync.valueOrNull?.progressPercentage ?? (fraction * 100.0);
+    final int earnedInLevel = summaryAsync.valueOrNull?.xpEarnedInCurrentLevel ?? 0;
+    final int requiredForNext = summaryAsync.valueOrNull?.xpRequiredForNextLevel ?? 100;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.focusPurple.withValues(alpha: 0.35),
+            AppTheme.growthTeal.withValues(alpha: 0.12),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.focusPurple.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppTheme.focusPurple,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      'Level $level',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    '$totalXp XP',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+              Text(
+                '${percentage.toStringAsFixed(0)}%',
+                style: const TextStyle(
+                  color: AppTheme.growthTeal,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: fraction,
+              minHeight: 10,
+              backgroundColor: Colors.white.withValues(alpha: 0.1),
+              valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.growthTeal),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '$earnedInLevel / $requiredForNext XP',
+                style: const TextStyle(color: Colors.white60, fontSize: 12),
+              ),
+              Text(
+                'Next: Level ${level + 1}',
+                style: const TextStyle(color: Colors.white38, fontSize: 12),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAchievementsCard(
+    BuildContext context,
+    AsyncValue<GamificationSummary> summaryAsync,
+  ) {
+    final int unlocked = summaryAsync.valueOrNull?.unlockedAchievements ?? 0;
+    final int total = summaryAsync.valueOrNull?.totalAchievements ?? 8;
+
+    return InkWell(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const AchievementsScreen()),
+        );
+      },
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.streakAmber.withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.emoji_events_rounded, color: AppTheme.streakAmber, size: 24),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Achievements',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$unlocked of $total Unlocked',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: Colors.white54),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecentXpSection(
+    BuildContext context,
+    AsyncValue<List<XpTransactionItem>> historyAsync,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Row(
+          children: [
+            Icon(Icons.history_rounded, size: 20, color: Colors.white70),
+            SizedBox(width: 8),
+            Text(
+              'Recent XP Activity',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        historyAsync.when(
+          loading: () => const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16.0),
+              child: CircularProgressIndicator(color: AppTheme.focusPurple),
+            ),
+          ),
+          error: (error, _) => Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.03),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Center(
+              child: Text(
+                'Unable to load XP activity',
+                style: TextStyle(color: Colors.white38, fontSize: 13),
+              ),
+            ),
+          ),
+          data: (history) {
+            if (history.isEmpty) {
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.03),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.04)),
+                ),
+                child: const Center(
+                  child: Text(
+                    'No XP activity recorded yet',
+                    style: TextStyle(color: Colors.white38, fontSize: 13),
+                  ),
+                ),
+              );
+            }
+
+            return Column(
+              children: history.map((item) => _buildXpItem(item)).toList(),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildXpItem(XpTransactionItem item) {
+    IconData icon;
+    Color iconColor;
+
+    switch (item.sourceType.toUpperCase()) {
+      case 'TASK':
+        icon = Icons.check_circle_outline_rounded;
+        iconColor = AppTheme.growthTeal;
+        break;
+      case 'HABIT':
+        icon = Icons.repeat_rounded;
+        iconColor = AppTheme.focusPurple;
+        break;
+      case 'STUDYSESSION':
+        icon = Icons.timer_rounded;
+        iconColor = AppTheme.streakAmber;
+        break;
+      case 'ACHIEVEMENT':
+        icon = Icons.emoji_events_rounded;
+        iconColor = AppTheme.streakAmber;
+        break;
+      default:
+        icon = Icons.stars_rounded;
+        iconColor = Colors.white54;
+        break;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.04)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: iconColor, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.description.isNotEmpty ? item.description : item.sourceType,
+                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _formatTimestamp(item.createdAt),
+                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            '+${item.amount} XP',
+            style: const TextStyle(
+              color: AppTheme.growthTeal,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatTimestamp(DateTime dateTime) {
+    final now = DateTime.now();
+    final diff = now.difference(dateTime.toLocal());
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    final local = dateTime.toLocal();
+    return '${local.month}/${local.day}/${local.year}';
   }
 
   String _formatFocusHours(int totalMinutes) {
@@ -190,9 +531,9 @@ class _StatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

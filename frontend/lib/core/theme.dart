@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
   // Brand Colors
@@ -20,19 +19,19 @@ class AppTheme {
         surface: midnightBase, // Cards will use a lighter overlay
         error: Colors.redAccent,
       ),
-      textTheme: TextTheme(
-        displayLarge: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.white),
-        displayMedium: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.white),
-        displaySmall: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.white),
-        headlineLarge: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.white),
-        headlineMedium: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.white),
-        headlineSmall: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.white),
-        titleLarge: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.white),
-        titleMedium: GoogleFonts.inter(fontWeight: FontWeight.w500, color: Colors.white),
-        titleSmall: GoogleFonts.inter(fontWeight: FontWeight.w500, color: Colors.white),
-        bodyLarge: GoogleFonts.inter(fontWeight: FontWeight.w400, color: Colors.white),
-        bodyMedium: GoogleFonts.inter(fontWeight: FontWeight.w400, color: Colors.white),
-        bodySmall: GoogleFonts.inter(fontWeight: FontWeight.w400, color: Colors.white70),
+      textTheme: const TextTheme(
+        displayLarge: TextStyle(fontWeight: FontWeight.w600, color: Colors.white, fontFamily: 'Poppins'),
+        displayMedium: TextStyle(fontWeight: FontWeight.w600, color: Colors.white, fontFamily: 'Poppins'),
+        displaySmall: TextStyle(fontWeight: FontWeight.w600, color: Colors.white, fontFamily: 'Poppins'),
+        headlineLarge: TextStyle(fontWeight: FontWeight.w600, color: Colors.white, fontFamily: 'Poppins'),
+        headlineMedium: TextStyle(fontWeight: FontWeight.w600, color: Colors.white, fontFamily: 'Poppins'),
+        headlineSmall: TextStyle(fontWeight: FontWeight.w600, color: Colors.white, fontFamily: 'Poppins'),
+        titleLarge: TextStyle(fontWeight: FontWeight.w600, color: Colors.white, fontFamily: 'Poppins'),
+        titleMedium: TextStyle(fontWeight: FontWeight.w500, color: Colors.white, fontFamily: 'Inter'),
+        titleSmall: TextStyle(fontWeight: FontWeight.w500, color: Colors.white, fontFamily: 'Inter'),
+        bodyLarge: TextStyle(fontWeight: FontWeight.w400, color: Colors.white, fontFamily: 'Inter'),
+        bodyMedium: TextStyle(fontWeight: FontWeight.w400, color: Colors.white, fontFamily: 'Inter'),
+        bodySmall: TextStyle(fontWeight: FontWeight.w400, color: Colors.white70, fontFamily: 'Inter'),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
@@ -42,15 +41,15 @@ class AppTheme {
             borderRadius: BorderRadius.circular(16),
           ),
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-          textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16, fontFamily: 'Inter'),
         ),
       ),
-      cardTheme: CardTheme(
-        color: Colors.white.withOpacity(0.08),
+      cardTheme: CardThemeData(
+        color: Colors.white.withValues(alpha: 0.08),
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: Colors.white.withOpacity(0.05)),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
         ),
       ),
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(

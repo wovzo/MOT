@@ -191,8 +191,8 @@ void main() {
     test('getDaily passes query parameters and maps daily analytics', () async {
       final client = MockNetworkClient((options) async {
         expect(options.path, 'analytics/daily');
-        expect(options.queryParameters?['startDate'], '2026-10-01');
-        expect(options.queryParameters?['endDate'], '2026-10-07');
+        expect(options.queryParameters['startDate'], '2026-10-01');
+        expect(options.queryParameters['endDate'], '2026-10-07');
         return Response(
           requestOptions: options,
           statusCode: 200,

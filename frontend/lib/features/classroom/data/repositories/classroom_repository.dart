@@ -1,4 +1,3 @@
-import 'package:dio/dio.dart';
 import '../../../../core/network_client.dart';
 import '../models/room_participant.dart';
 

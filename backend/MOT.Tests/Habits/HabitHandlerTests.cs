@@ -13,6 +13,7 @@ using MOT.Api.Controllers;
 using MOT.Application.Common.Exceptions;
 using MOT.Application.Common.Interfaces;
 using MOT.Application.DTOs;
+using MOT.Application.Gamification;
 using MOT.Application.Habits.Commands;
 using MOT.Application.Habits.Queries;
 using MOT.Domain.Entities;
@@ -25,6 +26,8 @@ public class HabitHandlerTests
 {
     private readonly Mock<IAppDbContext> _dbContextMock;
     private readonly Mock<ICurrentUserService> _currentUserServiceMock;
+    private readonly Mock<IGamificationService> _gamificationServiceMock;
+    private readonly Mock<IAchievementService> _achievementServiceMock;
     private readonly List<Habit> _habits;
     private readonly List<HabitCompletion> _completions;
 
@@ -34,6 +37,8 @@ public class HabitHandlerTests
         _completions = new List<HabitCompletion>();
         _dbContextMock = new Mock<IAppDbContext>();
         _currentUserServiceMock = new Mock<ICurrentUserService>();
+        _gamificationServiceMock = new Mock<IGamificationService>();
+        _achievementServiceMock = new Mock<IAchievementService>();
 
         var mockHabitsDbSet = MockDbSetHelper.CreateMockDbSet(_habits);
         var mockCompletionsDbSet = MockDbSetHelper.CreateMockDbSet(_completions);
@@ -194,7 +199,7 @@ public class HabitHandlerTests
         var habit = new Habit { Id = habitId, UserId = userId, Title = "Hydration" };
         _habits.Add(habit);
 
-        var handler = new ToggleHabitCompletionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new ToggleHabitCompletionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
         var command = new ToggleHabitCompletionCommand { HabitId = habitId };
 
         // Act
@@ -222,7 +227,7 @@ public class HabitHandlerTests
         _habits.Add(habit);
         _completions.Add(completion);
 
-        var handler = new ToggleHabitCompletionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new ToggleHabitCompletionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
         var command = new ToggleHabitCompletionCommand { HabitId = habitId };
 
         // Act
@@ -242,7 +247,7 @@ public class HabitHandlerTests
         _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
         var nonExistentHabitId = Guid.NewGuid();
 
-        var handler = new ToggleHabitCompletionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new ToggleHabitCompletionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
         var command = new ToggleHabitCompletionCommand { HabitId = nonExistentHabitId };
 
         // Act
@@ -267,7 +272,7 @@ public class HabitHandlerTests
         var habitB = new Habit { Id = habitBId, UserId = userB, Title = "User B Private Habit" };
         _habits.Add(habitB);
 
-        var handler = new ToggleHabitCompletionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new ToggleHabitCompletionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
         var command = new ToggleHabitCompletionCommand { HabitId = habitBId };
 
         // Act
@@ -734,7 +739,7 @@ public class HabitHandlerTests
         _dbContextMock.Setup(c => c.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new DbUpdateException("Duplicate entry for key 'IX_HabitCompletions_HabitId_Date'", new Exception("1062")));
 
-        var handler = new ToggleHabitCompletionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new ToggleHabitCompletionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
         var result = await handler.Handle(new ToggleHabitCompletionCommand { HabitId = habit.Id }, CancellationToken.None);
 
         // When duplicate race condition occurs on adding completion, handler catches it and idempotently returns true
@@ -762,7 +767,7 @@ public class HabitHandlerTests
         _completions.Add(c1);
         _completions.Add(c2);
 
-        var handler = new ToggleHabitCompletionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new ToggleHabitCompletionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
         var result = await handler.Handle(new ToggleHabitCompletionCommand { HabitId = habit.Id }, CancellationToken.None);
 
         result.Should().BeFalse(); // Now toggled off

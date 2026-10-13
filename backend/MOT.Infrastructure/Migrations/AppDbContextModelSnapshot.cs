@@ -216,6 +216,76 @@ namespace MOT.Infrastructure.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("MOT.Domain.Entities.UserAchievement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("AchievementCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<DateTime>("UnlockedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<int>("XpAwarded")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "AchievementCode")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "UnlockedAt");
+
+                    b.ToTable("UserAchievements");
+                });
+
+            modelBuilder.Entity("MOT.Domain.Entities.XpTransaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<int>("Amount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<string>("SourceId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<string>("SourceType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("varchar(32)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("char(36)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.HasIndex("UserId", "SourceType", "SourceId")
+                        .IsUnique();
+
+                    b.ToTable("XpTransactions");
+                });
+
             modelBuilder.Entity("MOT.Domain.Entities.DailyTask", b =>
                 {
                     b.HasOne("MOT.Domain.Entities.User", "User")
@@ -250,6 +320,28 @@ namespace MOT.Infrastructure.Migrations
                 });
 
             modelBuilder.Entity("MOT.Domain.Entities.StudySession", b =>
+                {
+                    b.HasOne("MOT.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("MOT.Domain.Entities.UserAchievement", b =>
+                {
+                    b.HasOne("MOT.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("MOT.Domain.Entities.XpTransaction", b =>
                 {
                     b.HasOne("MOT.Domain.Entities.User", "User")
                         .WithMany()

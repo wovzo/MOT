@@ -11,6 +11,8 @@ public interface IAppDbContext
     DbSet<HabitCompletion> HabitCompletions { get; }
     DbSet<StudySession> StudySessions { get; }
     DbSet<RoomParticipant> RoomParticipants { get; }
+    DbSet<XpTransaction> XpTransactions { get; }
+    DbSet<UserAchievement> UserAchievements { get; }
     
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
 }

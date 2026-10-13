@@ -12,6 +12,7 @@ using Moq;
 using MOT.Api.Controllers;
 using MOT.Application.Common.Exceptions;
 using MOT.Application.Common.Interfaces;
+using MOT.Application.Gamification;
 using MOT.Application.StudySessions;
 using MOT.Domain.Entities;
 using MOT.Tests.Common;
@@ -23,6 +24,8 @@ public class StudySessionHandlerTests
 {
     private readonly Mock<IAppDbContext> _dbContextMock;
     private readonly Mock<ICurrentUserService> _currentUserServiceMock;
+    private readonly Mock<IGamificationService> _gamificationServiceMock;
+    private readonly Mock<IAchievementService> _achievementServiceMock;
     private readonly List<StudySession> _sessions;
 
     public StudySessionHandlerTests()
@@ -30,6 +33,8 @@ public class StudySessionHandlerTests
         _sessions = new List<StudySession>();
         _dbContextMock = new Mock<IAppDbContext>();
         _currentUserServiceMock = new Mock<ICurrentUserService>();
+        _gamificationServiceMock = new Mock<IGamificationService>();
+        _achievementServiceMock = new Mock<IAchievementService>();
 
         var mockDbSet = MockDbSetHelper.CreateMockDbSet(_sessions);
         _dbContextMock.Setup(c => c.StudySessions).Returns(mockDbSet.Object);
@@ -102,7 +107,7 @@ public class StudySessionHandlerTests
         };
         _sessions.Add(session);
 
-        var handler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
         var command = new EndStudySessionCommand { SessionId = session.Id };
 
         // Act
@@ -143,7 +148,7 @@ public class StudySessionHandlerTests
         };
         _sessions.Add(session);
 
-        var handler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
         var command = new EndStudySessionCommand { SessionId = session.Id };
 
         // Act
@@ -177,7 +182,7 @@ public class StudySessionHandlerTests
         };
         _sessions.Add(session);
 
-        var handler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
         var command = new EndStudySessionCommand { SessionId = session.Id };
 
         // Act
@@ -208,7 +213,7 @@ public class StudySessionHandlerTests
         };
         _sessions.Add(sessionB);
 
-        var handler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
         var command = new EndStudySessionCommand { SessionId = sessionB.Id };
 
         // Act
@@ -450,7 +455,7 @@ public class StudySessionHandlerTests
         _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
         var nonExistentId = Guid.NewGuid();
 
-        var handler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var handler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
         var command = new EndStudySessionCommand { SessionId = nonExistentId };
 
         // Act
@@ -690,7 +695,7 @@ public class StudySessionHandlerTests
         };
         _sessions.Add(activeSession);
 
-        var endHandler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var endHandler = new EndStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object, _gamificationServiceMock.Object, _achievementServiceMock.Object);
         await endHandler.Handle(new EndStudySessionCommand { SessionId = activeSession.Id }, CancellationToken.None);
 
         var startHandler = new StartStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
