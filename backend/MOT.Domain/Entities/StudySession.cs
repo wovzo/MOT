@@ -9,6 +9,9 @@ namespace MOT.Domain.Entities
         public User? User { get; set; }
         public string Title { get; set; } = "Focus Session";
         
+        public Guid? SubjectId { get; set; }
+        public Subject? Subject { get; set; }
+
         public DateTime StartTime { get; set; } = DateTime.UtcNow;
         public DateTime? EndTime { get; set; }
         

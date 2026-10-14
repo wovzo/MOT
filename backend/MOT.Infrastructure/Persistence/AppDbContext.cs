@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using MOT.Domain.Entities;
-
 using MOT.Application.Common.Interfaces;
 
 namespace MOT.Infrastructure.Persistence;
@@ -17,6 +16,8 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<RoomParticipant> RoomParticipants { get; set; }
     public DbSet<XpTransaction> XpTransactions { get; set; }
     public DbSet<UserAchievement> UserAchievements { get; set; }
+    public DbSet<Subject> Subjects { get; set; }
+    public DbSet<DailyGoal> DailyGoals { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -34,6 +35,13 @@ public class AppDbContext : DbContext, IAppDbContext
             entity.HasOne(e => e.User)
                   .WithMany()
                   .HasForeignKey(e => e.UserId);
+
+            entity.HasOne(e => e.Subject)
+                  .WithMany()
+                  .HasForeignKey(e => e.SubjectId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.SubjectId);
         });
 
         modelBuilder.Entity<StudySession>(entity =>
@@ -46,6 +54,12 @@ public class AppDbContext : DbContext, IAppDbContext
                   .IsRequired();
             entity.HasIndex(e => e.UserId);
 
+            entity.HasOne(e => e.Subject)
+                  .WithMany()
+                  .HasForeignKey(e => e.SubjectId)
+                  .OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(e => e.SubjectId);
+
             entity.Property(e => e.ActiveUserId)
                   .HasColumnType("char(36)")
                   .IsRequired(false);
@@ -56,6 +70,48 @@ public class AppDbContext : DbContext, IAppDbContext
                   .HasDefaultValue(false);
             entity.Property(e => e.AccumulatedSeconds)
                   .HasDefaultValue(0);
+        });
+
+        modelBuilder.Entity<Subject>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade)
+                  .IsRequired();
+
+            entity.Property(e => e.Name)
+                  .HasMaxLength(100)
+                  .IsRequired();
+
+            entity.Property(e => e.Description)
+                  .HasMaxLength(500);
+
+            entity.Property(e => e.ColorHex)
+                  .HasMaxLength(9);
+
+            entity.HasIndex(e => new { e.UserId, e.Name })
+                  .IsUnique();
+        });
+
+        modelBuilder.Entity<DailyGoal>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade)
+                  .IsRequired();
+
+            entity.Property(e => e.TargetMinutes)
+                  .IsRequired();
+
+            entity.Property(e => e.Date)
+                  .IsRequired();
+
+            entity.HasIndex(e => new { e.UserId, e.Date })
+                  .IsUnique();
         });
 
         modelBuilder.Entity<RoomParticipant>(entity =>

@@ -1,3 +1,5 @@
+using System;
+
 namespace MOT.Domain.Entities;
 
 public class DailyTask
@@ -11,4 +13,8 @@ public class DailyTask
     // Foreign Key for the User
     public Guid UserId { get; set; }
     public User? User { get; set; }
+
+    // Optional Subject association
+    public Guid? SubjectId { get; set; }
+    public Subject? Subject { get; set; }
 }

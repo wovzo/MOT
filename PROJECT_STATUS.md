@@ -2397,3 +2397,72 @@ Phase 9 completes the study session lifecycle in Mind On Track (MOT) by implemen
   - Live/remote database untouched; 0 migrations applied.
 
 ---
+
+## Phase 10 — Subjects and Daily Study Goals
+
+**Status: COMPLETED / VERIFIED**
+
+Phase 10 completes Subjects and Daily Study Goals across the .NET 8 backend and Flutter frontend, adhering strictly to Clean Architecture, CQRS/MediatR, FluentValidation, Riverpod state management, and multi-tenant isolation.
+
+### 1. Implemented Functionality & Architecture Decisions
+- **Subject Management (`Subject.cs`):**
+  - Unique subject entity with `UserId`, `Name` (max 100 chars), `Description` (optional max 500 chars), `ColorHex` (optional max 9 chars), `CreatedAt`, and `UpdatedAt`.
+  - Normalization policy: subject names are trimmed and validated for case-insensitive uniqueness per user (`_context.Subjects.AnyAsync(s => s.UserId == userId && s.Name.ToLower() == normalizedName.ToLower())`).
+  - Referential integrity: optional `SubjectId` added to `StudySession` and `DailyTask` with `DeleteBehavior.SetNull`. Deleting a subject safely nullifies `SubjectId` on associated records, guaranteeing zero data loss for past study sessions, focus metrics, tasks, or XP transactions.
+- **Daily Study Goals (`DailyGoal.cs`):**
+  - Smallest useful design: Users can customize their daily focus target (5 to 1440 minutes) for any calendar date, falling back to a sensible 60-minute default when unconfigured.
+  - Entity contains `UserId`, `Date` (normalized to calendar date at midnight UTC), `TargetMinutes`, `CreatedAt`, and `UpdatedAt`.
+  - Unique constraint on `(UserId, Date)`.
+  - Duration accounting policy: Actual focused time is calculated strictly from completed study sessions (`IsCompleted == true` and `EndTime != null`), excluding paused intervals (using `DurationMinutes = AccumulatedSeconds / 60`). Incomplete or active sessions are strictly excluded.
+  - Timezone policy: Accepts optional `TimeZoneOffsetMinutes` (-840 to +840, defaulting to 0 UTC), adjusting the date range window in UTC so sessions completed near local midnight boundaries are attributed to the correct local calendar day.
+
+### 2. New & Changed API Endpoints
+- **Subjects Controller (`api/subjects`):**
+  - `GET /api/subjects`: Returns list of authenticated user's subjects ordered by name.
+  - `POST /api/subjects`: Creates a new subject; returns HTTP 201 Created with `SubjectDto` (HTTP 400 on duplicate name or invalid length).
+  - `GET /api/subjects/{id}`: Returns single `SubjectDto` (HTTP 404 if missing or belongs to another user).
+  - `PUT /api/subjects/{id}`: Updates subject details; returns HTTP 200 `SubjectDto` (HTTP 400 on duplicate name, HTTP 404 if unauthorized).
+  - `DELETE /api/subjects/{id}`: Safely deletes subject and sets references to null; returns HTTP 204 NoContent.
+- **Daily Goals Controller (`api/dailygoals`):**
+  - `GET /api/dailygoals/progress?date=yyyy-MM-dd&timeZoneOffsetMinutes=0`: Returns `DailyGoalProgressDto` with `targetMinutes`, `actualMinutes`, `remainingMinutes`, `progressPercentage`, `isAchieved`, and `completedSessionsCount`.
+  - `POST /api/dailygoals`: Upserts daily target; returns updated `DailyGoalProgressDto`.
+
+### 3. Schema & EF Core Migrations
+- **Generated Migration:** `20261014102030_AddSubjectsAndDailyGoals` (scaffolded locally in `MOT.Infrastructure`).
+- **Snapshot Verification:** `dotnet ef migrations has-pending-model-changes` verified: **0 pending model changes**.
+- **Database Safety:** Zero remote database connections, queries, or migration executions.
+
+### 4. Flutter Integration
+- **Subjects Feature (`frontend/lib/features/subjects/`):**
+  - Model: `Subject` with defensive null-safe parsing and `toJson()`.
+  - Repository: `SubjectRepository` with full CRUD operations.
+  - Provider: `subjectsProvider` (`FutureProvider<List<Subject>>`).
+  - Screen: `SubjectsScreen` with subject list cards, color indicators, empty states, add/edit bottom sheets, and delete confirmation dialogs.
+- **Daily Goals Feature (`frontend/lib/features/daily_goals/`):**
+  - Model: `DailyGoalProgress` with progress calculation, achievement state, and session counts.
+  - Repository: `DailyGoalRepository` with `getProgress` and `setGoal`.
+  - Provider: `dailyGoalProgressProvider(date)` (`FutureProvider.family`).
+  - Screen: `DailyGoalsScreen` featuring date navigation, circular progress ring with status pills, target/focused/remaining metrics tiles, and an adjust target bottom sheet with quick preset chips (30, 45, 60, 90, 120, 180 mins).
+- **Navigation Integration:**
+  - `ProfileScreen`: Added navigation cards for "Daily Study Goal" and "Manage Subjects".
+  - `TimerScreen`: Added action bar button directly opening `DailyGoalsScreen`.
+
+### 5. Verification & Test Suite
+- **Backend Tests (`MOT.Tests`):**
+  - `SubjectHandlerTests.cs`: 12 tests covering CRUD, case-insensitive duplicate name rejection, tenant isolation, length limits, hex color validation, and HTTP status codes.
+  - `DailyGoalHandlerTests.cs`: 8 tests covering default targets, progress calculation from completed sessions, exclusion of paused/incomplete sessions, timezone boundary shifts, upsert behavior, and validation.
+  - Total backend tests: **501 / 501 passed (100%)**.
+- **Frontend Tests (`frontend/test`):**
+  - `subject_model_and_repository_test.dart`: 8 tests covering JSON serialization, deserialization fallbacks, repository endpoints, and duplicate error extraction.
+  - `daily_goal_model_and_repository_test.dart`: 6 tests covering model parsing, fallbacks, repository query parameters, and validation error extraction.
+  - `subjects_and_daily_goals_ui_test.dart`: 5 widget tests covering empty states, card rendering, add subject sheets, progress ring displays, achievement badges, and target adjustment sheets.
+  - Total Flutter tests: **81 / 81 passed (100%)**.
+  - `flutter analyze --no-fatal-infos`: **0 errors, 0 warnings**.
+
+### 6. Known Limitations & Follow-Up Work
+- Subject selection dropdown during study session creation can be wired directly into `timer_screen.dart` in a future enhancement.
+- Historical daily goal progress analytics (e.g. 7-day goal completion streaks) can be added to the analytics dashboard.
+- No remote database updates or deployments occurred.
+
+---
+

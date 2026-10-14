@@ -37,6 +37,8 @@ namespace MOT.Application.StudySessions
                 {
                     Id = session.Id,
                     Title = session.Title,
+                    SubjectId = session.SubjectId,
+                    SubjectName = session.Subject != null ? session.Subject.Name : null,
                     StartTime = session.StartTime,
                     EndTime = session.EndTime,
                     DurationMinutes = session.DurationMinutes,

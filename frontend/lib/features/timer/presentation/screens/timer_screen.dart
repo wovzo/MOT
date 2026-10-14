@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/network_client.dart';
 import '../../data/models/study_session_model.dart';
 import '../../data/repositories/study_session_repository.dart';
+import '../../../daily_goals/presentation/screens/daily_goals_screen.dart';
 
 class TimerScreen extends StatefulWidget {
   final StudySessionRepository? repository;
@@ -255,6 +256,19 @@ class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
         backgroundColor: Colors.transparent,
         elevation: 0,
         title: const Text('Focus Timer', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        actions: [
+          IconButton(
+            key: const Key('timerDailyGoalButton'),
+            icon: const Icon(Icons.flag_outlined, color: Color(0xFF00D9C0)),
+            tooltip: 'Daily Goal',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const DailyGoalsScreen()),
+              );
+            },
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         child: Column(

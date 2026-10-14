@@ -31,6 +31,8 @@ public static class StudySessionExtensions
         {
             Id = session.Id,
             Title = session.Title,
+            SubjectId = session.SubjectId,
+            SubjectName = session.Subject?.Name,
             StartTime = session.StartTime,
             EndTime = session.EndTime,
             DurationMinutes = session.IsCompleted ? session.DurationMinutes : Math.Max(0, elapsedSeconds / 60),

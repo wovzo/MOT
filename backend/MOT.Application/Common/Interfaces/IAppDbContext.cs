@@ -13,6 +13,8 @@ public interface IAppDbContext
     DbSet<RoomParticipant> RoomParticipants { get; }
     DbSet<XpTransaction> XpTransactions { get; }
     DbSet<UserAchievement> UserAchievements { get; }
+    DbSet<Subject> Subjects { get; }
+    DbSet<DailyGoal> DailyGoals { get; }
     
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
 }

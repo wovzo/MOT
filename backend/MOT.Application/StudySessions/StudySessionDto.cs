@@ -6,6 +6,8 @@ namespace MOT.Application.StudySessions
     {
         public Guid Id { get; set; }
         public string Title { get; set; } = string.Empty;
+        public Guid? SubjectId { get; set; }
+        public string? SubjectName { get; set; }
         public DateTime StartTime { get; set; }
         public DateTime? EndTime { get; set; }
         public int DurationMinutes { get; set; }

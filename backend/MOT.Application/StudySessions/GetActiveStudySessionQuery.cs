@@ -30,6 +30,7 @@ namespace MOT.Application.StudySessions
                 throw new UnauthorizedAccessException();
 
             var session = await _context.StudySessions
+                .Include(s => s.Subject)
                 .Where(s => s.UserId == userId && !s.IsCompleted)
                 .OrderByDescending(s => s.StartTime)
                 .FirstOrDefaultAsync(cancellationToken);

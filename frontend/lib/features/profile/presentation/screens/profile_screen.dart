@@ -9,6 +9,8 @@ import '../../../gamification/presentation/providers/gamification_providers.dart
 import '../../../gamification/presentation/screens/achievements_screen.dart';
 import '../../data/models/user_profile.dart';
 import 'settings_screen.dart';
+import '../../../subjects/presentation/screens/subjects_screen.dart';
+import '../../../daily_goals/presentation/screens/daily_goals_screen.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -131,13 +133,17 @@ class ProfileScreen extends ConsumerWidget {
 
                 // 3. Achievements Navigation Card
                 _buildAchievementsCard(context, summaryAsync),
+                const SizedBox(height: 20),
+
+                // 4. Daily Goals & Subjects Navigation Cards
+                _buildStudyFeaturesCards(context),
                 const SizedBox(height: 24),
 
-                // 4. Recent XP History Section
+                // 5. Recent XP History Section
                 _buildRecentXpSection(context, historyAsync),
                 const SizedBox(height: 36),
 
-                // 5. Logout Button
+                // 6. Logout Button
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
@@ -313,6 +319,110 @@ class ProfileScreen extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildStudyFeaturesCards(BuildContext context) {
+    return Column(
+      children: [
+        InkWell(
+          key: const Key('dailyGoalNavCard'),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const DailyGoalsScreen()),
+            );
+          },
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00D9C0).withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.flag_rounded, color: Color(0xFF00D9C0), size: 24),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Daily Study Goal',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'Configure and track your daily focus target',
+                        style: TextStyle(fontSize: 12, color: Colors.white54),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded, color: Colors.white38),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        InkWell(
+          key: const Key('subjectsNavCard'),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SubjectsScreen()),
+            );
+          },
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6C5CE7).withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.auto_stories_rounded, color: Color(0xFFA29BFE), size: 24),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Manage Subjects',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'Organize sessions and tasks by subject',
+                        style: TextStyle(fontSize: 12, color: Colors.white54),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded, color: Colors.white38),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 

@@ -12,6 +12,7 @@ namespace MOT.Application.StudySessions
     public class StartStudySessionCommand : IRequest<StudySessionDto>
     {
         public string Title { get; set; } = "Focus Session";
+        public Guid? SubjectId { get; set; }
     }
 
     public class StartStudySessionCommandHandler : IRequestHandler<StartStudySessionCommand, StudySessionDto>
@@ -39,12 +40,23 @@ namespace MOT.Application.StudySessions
                 throw new ActiveStudySessionAlreadyExistsException();
             }
 
+            if (request.SubjectId.HasValue)
+            {
+                var subjectExists = await _context.Subjects
+                    .AnyAsync(s => s.Id == request.SubjectId.Value && s.UserId == userId, cancellationToken);
+                if (!subjectExists)
+                {
+                    throw new SubjectNotFoundException(request.SubjectId.Value);
+                }
+            }
+
             var now = DateTime.UtcNow;
             var session = new StudySession
             {
                 UserId = userId,
                 ActiveUserId = userId,
                 Title = request.Title,
+                SubjectId = request.SubjectId,
                 StartTime = now,
                 LastResumedAt = now,
                 IsPaused = false,
