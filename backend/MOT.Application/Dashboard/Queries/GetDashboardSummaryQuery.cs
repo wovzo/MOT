@@ -154,7 +154,8 @@ public class GetDashboardSummaryQueryHandler : IRequestHandler<GetDashboardSumma
             .OrderBy(h => h.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        var habitDtos = habits.Select(h => HabitStreakCalculator.ToDto(h, targetDate)).ToList();
+        var habitToday = DateTime.UtcNow.Date;
+        var habitDtos = habits.Select(h => HabitStreakCalculator.ToDto(h, habitToday)).ToList();
         var totalHabits = habitDtos.Count;
         var completedHabitsToday = habitDtos.Count(h => h.IsCompletedToday);
         var habitCompletionRate = totalHabits > 0
@@ -171,7 +172,7 @@ public class GetDashboardSummaryQueryHandler : IRequestHandler<GetDashboardSumma
 
         // Calculate unified streak across habit completions
         var allCompletions = habits.SelectMany(h => h.Completions).ToList();
-        var (isStreakActiveToday, currentStreak) = HabitStreakCalculator.CalculateStreak(allCompletions, targetDate);
+        var (isStreakActiveToday, currentStreak) = HabitStreakCalculator.CalculateStreak(allCompletions, habitToday);
 
         var uniqueCompletionDates = allCompletions
             .Select(c => c.Date.Date)

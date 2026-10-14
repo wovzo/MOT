@@ -275,4 +275,151 @@ public class DashboardHandlerTests
         var okResult = actionResult.Should().BeOfType<OkObjectResult>().Subject;
         okResult.Value.Should().BeEquivalentTo(fakeSummary);
     }
+
+    [Fact]
+    public async Task GetDashboardSummary_ExcludesIncompleteSessionsFromDailyGoalAndWeeklyActivity()
+    {
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+        _users.Add(new User { Id = userId, DisplayName = "Test User" });
+
+        var today = DateTime.UtcNow.Date;
+
+        // Incomplete session (running, duration 40 mins so far)
+        _studySessions.Add(new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Running Session",
+            StartTime = today.AddHours(2),
+            DurationMinutes = 40,
+            AccumulatedSeconds = 2400,
+            IsCompleted = false,
+            EndTime = null
+        });
+
+        // Completed session (duration 30 mins)
+        _studySessions.Add(new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Finished Session",
+            StartTime = today.AddHours(5),
+            EndTime = today.AddHours(5).AddMinutes(30),
+            DurationMinutes = 30,
+            AccumulatedSeconds = 1800,
+            IsCompleted = true
+        });
+
+        var handler = new GetDashboardSummaryQueryHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var result = await handler.Handle(new GetDashboardSummaryQuery { TimeZoneOffsetMinutes = 0 }, CancellationToken.None);
+
+        // Only the 30-minute completed session should be counted
+        result.DailyGoal.ActualMinutes.Should().Be(30);
+        result.DailyGoal.CompletedSessionsCount.Should().Be(1);
+        result.RecentSessions.Should().HaveCount(1);
+        result.RecentSessions[0].Title.Should().Be("Finished Session");
+        result.ActiveSession.Should().NotBeNull();
+        result.ActiveSession!.Title.Should().Be("Running Session");
+    }
+
+    [Fact]
+    public async Task GetDashboardSummary_ActiveSession_WhenPaused_ReportsAccumulatedSeconds()
+    {
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+        _users.Add(new User { Id = userId, DisplayName = "Test User" });
+
+        _studySessions.Add(new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Paused Session",
+            StartTime = DateTime.UtcNow.AddMinutes(-30),
+            DurationMinutes = 15,
+            AccumulatedSeconds = 900,
+            IsCompleted = false,
+            IsPaused = true,
+            LastPausedAt = DateTime.UtcNow.AddMinutes(-15)
+        });
+
+        var handler = new GetDashboardSummaryQueryHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var result = await handler.Handle(new GetDashboardSummaryQuery { TimeZoneOffsetMinutes = 0 }, CancellationToken.None);
+
+        result.ActiveSession.Should().NotBeNull();
+        result.ActiveSession!.IsPaused.Should().BeTrue();
+        result.ActiveSession.AccumulatedSeconds.Should().Be(900);
+        result.ActiveSession.ElapsedSeconds.Should().Be(900);
+    }
+
+    [Fact]
+    public async Task GetDashboardSummary_StreakCalculation_AccountsForMultipleHabitsAndGaps()
+    {
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+        _users.Add(new User { Id = userId, DisplayName = "Test User" });
+
+        var habitA = new Habit { Id = Guid.NewGuid(), UserId = userId, Title = "Habit A" };
+        var habitB = new Habit { Id = Guid.NewGuid(), UserId = userId, Title = "Habit B" };
+        _habits.Add(habitA);
+        _habits.Add(habitB);
+
+        var today = DateTime.UtcNow.Date;
+
+        // Habit completions forming a historical 3-day streak (5, 4, 3 days ago), then a gap (2 days ago missed),
+        // then completed yesterday and today (2-day streak).
+        var comps = new List<HabitCompletion>
+        {
+            new() { Id = Guid.NewGuid(), HabitId = habitA.Id, Habit = habitA, Date = today.AddDays(-5) },
+            new() { Id = Guid.NewGuid(), HabitId = habitB.Id, Habit = habitB, Date = today.AddDays(-4) },
+            new() { Id = Guid.NewGuid(), HabitId = habitA.Id, Habit = habitA, Date = today.AddDays(-3) },
+            // Gap at today - 2
+            new() { Id = Guid.NewGuid(), HabitId = habitA.Id, Habit = habitA, Date = today.AddDays(-1) },
+            new() { Id = Guid.NewGuid(), HabitId = habitB.Id, Habit = habitB, Date = today }
+        };
+
+        habitA.Completions = comps.Where(c => c.HabitId == habitA.Id).ToList();
+        habitB.Completions = comps.Where(c => c.HabitId == habitB.Id).ToList();
+        _habitCompletions.AddRange(comps);
+
+        var handler = new GetDashboardSummaryQueryHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var result = await handler.Handle(new GetDashboardSummaryQuery { TimeZoneOffsetMinutes = 0 }, CancellationToken.None);
+
+        result.Streak.CurrentStreak.Should().Be(2);
+        result.Streak.IsActiveToday.Should().BeTrue();
+        result.Streak.LongestStreak.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task GetDashboardSummary_StrictTenantIsolation_DoesNotLeakOtherUserData()
+    {
+        var user1 = Guid.NewGuid();
+        var user2 = Guid.NewGuid();
+
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(user1.ToString());
+        _users.Add(new User { Id = user1, DisplayName = "User One", XP = 100 });
+        _users.Add(new User { Id = user2, DisplayName = "User Two", XP = 9999 });
+
+        // User 2's tasks, habits, and sessions
+        _tasks.Add(new DailyTask { Id = Guid.NewGuid(), UserId = user2, Title = "User 2 Secret Task" });
+        var habit2 = new Habit { Id = Guid.NewGuid(), UserId = user2, Title = "User 2 Habit" };
+        _habits.Add(habit2);
+        _studySessions.Add(new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = user2,
+            Title = "User 2 Session",
+            DurationMinutes = 120,
+            IsCompleted = true,
+            EndTime = DateTime.UtcNow
+        });
+
+        var handler = new GetDashboardSummaryQueryHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+        var result = await handler.Handle(new GetDashboardSummaryQuery { TimeZoneOffsetMinutes = 0 }, CancellationToken.None);
+
+        result.Tasks.TotalCount.Should().Be(0);
+        result.Habits.TotalCount.Should().Be(0);
+        result.RecentSessions.Should().BeEmpty();
+        result.Gamification.TotalXp.Should().Be(100);
+    }
 }

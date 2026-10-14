@@ -1,18 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../features/dashboard/presentation/providers/dashboard_provider.dart';
 import '../../../features/dashboard/presentation/screens/dashboard_screen.dart';
 import '../../../features/tasks/presentation/screens/task_dashboard_screen.dart';
 import '../../../features/habits/presentation/screens/habit_dashboard_screen.dart';
 import '../../../features/timer/presentation/screens/timer_screen.dart';
 import '../../../features/profile/presentation/screens/profile_screen.dart';
 
-class HomeScreen extends StatefulWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _currentIndex = 0;
 
   @override
@@ -37,7 +39,12 @@ class _HomeScreenState extends State<HomeScreen> {
         unselectedItemColor: Colors.white54,
         type: BottomNavigationBarType.fixed,
         currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
+        onTap: (index) {
+          if (index == 0 && _currentIndex != 0) {
+            ref.invalidate(dashboardSummaryProvider);
+          }
+          setState(() => _currentIndex = index);
+        },
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.dashboard_rounded),

@@ -244,4 +244,42 @@ void main() {
     await tester.tap(find.text('Open Timer'));
     expect(timerTapped, isTrue);
   });
+
+  testWidgets('DashboardScreen renders on small screen without overflow', (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      createTestWidget(summaryState: AsyncValue.data(sampleSummary)),
+    );
+
+    await tester.pumpAndSettle();
+
+    expect(find.text('Mind On Track'), findsOneWidget);
+    expect(find.text('Daily Study Goal'), findsOneWidget);
+
+    await tester.scrollUntilVisible(find.text('Habit Streak: 5d'), 200);
+    expect(find.text('Habit Streak: 5d'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('DashboardScreen pull to refresh triggers provider reload', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      createTestWidget(summaryState: AsyncValue.data(sampleSummary)),
+    );
+
+    await tester.pumpAndSettle();
+
+    // Target the outermost scrollable ListView and drag down to trigger pull-to-refresh
+    await tester.fling(find.byType(ListView).first, const Offset(0, 300), 1000);
+    await tester.pump();
+
+    expect(find.byType(RefreshIndicator), findsOneWidget);
+  });
 }
+

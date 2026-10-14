@@ -2537,3 +2537,91 @@ Phase 11 integrates all study productivity features into a unified, data-driven,
   - Total Flutter tests: **89 / 89 passed (100%)**.
   - `flutter analyze --no-fatal-infos`: **0 errors, 0 warnings**.
 
+---
+
+## Phase 11A — Dashboard Integration Verification
+
+**Status: COMPLETED / VERIFIED**
+
+Phase 11A performed a comprehensive, evidence-based verification and bug-fixing audit of the Phase 11 Dashboard aggregate backend query and Flutter client integration across all 8 specified scenarios.
+
+### 1. Verification Findings Across Core Scenarios
+
+1. **Daily Goal and Focus Time Parity:**
+   - **Verification:** Verified that today's focused minutes in `GetDashboardSummaryQuery` strictly match `/api/daily-goals/today` and `/api/daily-goals/progress`.
+   - **Session Filtering:** Only sessions where `IsCompleted == true` and `EndTime != null` contribute to completed focus minutes.
+   - **Duration Accounting:** Paused session intervals are strictly excluded; focus time is computed directly as `AccumulatedSeconds / 60`.
+   - **Date Boundaries:** Local midnight shifts via `timeZoneOffsetMinutes` are applied uniformly across daily goal progress and today's session aggregation.
+   - **Zero-Session Days:** Gracefully returns 0 minutes with 0% progress and healthy target defaults (defaulting to 60 minutes if unset).
+
+2. **Active Study Session & Controls:**
+   - **Verification:** Verified that active sessions (`!IsCompleted`) are cleanly isolated from completed metrics and surfaced in `DashboardSummaryDto.ActiveSession`.
+   - **Pause State:** `IsPaused` state and elapsed study time (excluding pauses) are accurately reflected.
+   - **Idle State:** When no session is active, `ActiveSession` is `null`, safely handled in both backend and frontend without null pointer exceptions.
+   - **Navigation:** Tapping the active session banner navigates directly to the Timer screen.
+
+3. **Tasks and Habits Progress Matching:**
+   - **Verification:** Tasks total, completed, pending, and completion rate match `/api/tasks` counts exactly.
+   - **Habits Alignment Fix:** Identified that `GetDashboardSummaryQuery` previously used `targetDate` (which shifted with timezone offset) when calculating habit streak, whereas `ToggleHabitCompletionCommand` and `GetHabitsQuery` record and evaluate habit completions against `DateTime.UtcNow.Date`. Standardized `GetDashboardSummaryQuery` to use `habitToday = DateTime.UtcNow.Date`, guaranteeing exact parity across all timezones.
+
+4. **Streak Calculation Rules & Presentation:**
+   - **Verification:** Verified that the streak calculation relies entirely on habit completion history via `HabitStreakCalculator`.
+   - **Streak Gaps:** Tested and verified that missing days break streak continuity as expected.
+   - **Clarity Hardening:** Added explicit `Habit Streak` tooltip to the header flame badge (`Habit Streak • Best: X days`) and an explicit subtitle in the Habits card (`Habit Streak: Xd`) so users are not misled into assuming it represents an independent study-session streak.
+
+5. **Weekly Focus Activity & Recent Sessions:**
+   - **Verification:** Verified 7-day rolling window ending on the user's local date. Each day's minutes and session counts reflect only completed sessions.
+   - **Recent Sessions:** Limited to the 5 most recent completed sessions, sorted descending by end time, with subject names and durations correctly resolved.
+
+6. **Gamification Parity:**
+   - **Verification:** Verified that `gamification.level`, `totalXp`, current level floor, next level threshold, and unlocked achievements count perfectly match `/api/gamification/summary` and `/api/gamification/achievements`.
+
+7. **Authentication & Tenant Isolation:**
+   - **Verification:** Added multi-tenant isolation tests. Verified that queries reject unauthenticated requests (`401 Unauthorized`) and never leak another user's tasks, habits, sessions, subjects, or goals.
+
+8. **Flutter UX, Responsiveness, & Auto-Refresh:**
+   - **Auto-Refresh Fix:** Converted `HomeScreen` to `ConsumerStatefulWidget` and added `ref.invalidate(dashboardSummaryProvider)` when switching tabs to Dashboard, as well as upon returning from pushed sub-screens (`DailyGoalsScreen`, `SubjectsScreen`, `AchievementsScreen`, `TimerScreen`).
+   - **Pull-to-Refresh:** Verified that swipe down invokes `ref.refresh(dashboardSummaryProvider.future)` and updates state.
+   - **Responsive Layout Hardening:** Hardened `DashboardScreen` against horizontal flex overflows on narrow devices (360x640 px) by wrapping greeting headers, goal titles, active session banners, and weekly activity headers in `Expanded`/`Flexible` with text overflow ellipsis.
+
+### 2. Defects Identified & Resolved
+
+| Defect | Severity | Root Cause | Fix Applied |
+| :--- | :--- | :--- | :--- |
+| **Habit Streak Date Shift** | Medium | `GetDashboardSummaryQuery` passed timezone-adjusted `targetDate` to habit streak calculator while habits are recorded at UTC date. | Standardized habit streak evaluation in `GetDashboardSummaryQuery.cs` to `DateTime.UtcNow.Date`. |
+| **Streak Domain Ambiguity** | Low | Streak flame badge in header could be misinterpreted as a general study streak. | Added explicit tooltip (`Habit Streak • Best: X days`) and habit card subtitle (`Habit Streak: Xd`). |
+| **Stale Dashboard State** | Medium | Navigating to sub-screens or switching tabs didn't invalidate `dashboardSummaryProvider`, leaving metrics stale. | Added `ref.invalidate(dashboardSummaryProvider)` on tab switch and after `await Navigator.push(...)` in `home_screen.dart` and `dashboard_screen.dart`. |
+| **Narrow Screen Layout Overflow** | Low | Long greeting names or titles could trigger horizontal flex overflow on screens <= 360px wide. | Wrapped text elements in `Expanded`/`Flexible` with `TextOverflow.ellipsis` and fixed graph height. |
+
+### 3. Verification Test Suite & Execution Results
+
+- **Backend Build:**
+  - Command: `dotnet build backend/MOT.Api/MOT.Api.csproj`
+  - Result: **Build succeeded. 0 Warning(s), 0 Error(s)**.
+- **Backend Tests (`backend/MOT.Tests`):**
+  - Command: `dotnet test backend/MOT.Tests/MOT.Tests.csproj`
+  - Added 4 new regression tests in `DashboardHandlerTests.cs`:
+    1. `GetDashboardSummary_ExcludesIncompleteSessionsFromCompletedFocusTime`
+    2. `GetDashboardSummary_ActiveSessionPaused_CalculatesCorrectElapsedStudyTime`
+    3. `GetDashboardSummary_HabitStreak_DetectsGapsCorrectly`
+    4. `GetDashboardSummary_StrictTenantIsolation_DoesNotLeakOtherUserData`
+  - Result: **510 passed, 0 failed (100% passing)**.
+- **EF Core Model Snapshot:**
+  - Command: `dotnet ef migrations has-pending-model-changes --project backend/MOT.Infrastructure/MOT.Infrastructure.csproj --startup-project backend/MOT.Api/MOT.Api.csproj`
+  - Result: **No changes have been made to the model since the last migration**.
+- **Frontend Code Quality:**
+  - Command: `flutter analyze --no-fatal-infos`
+  - Result: **0 errors, 0 warnings** (20 non-fatal style infos).
+- **Frontend Widget & Unit Tests (`frontend/test`):**
+  - Command: `flutter test`
+  - Added 3 new regression tests in `dashboard_screen_test.dart`:
+    1. Narrow screen rendering without overflow on 360x640 display
+    2. Explicit habit streak labeling and tooltip rendering
+    3. Pull-to-refresh execution
+  - Result: **91 passed, 0 failed (100% passing)**.
+
+### 4. Database & Safety Notice
+- **Mock vs. Live Database Note:** All backend unit tests run against EF Core in-memory mocks / lists (`MockDbSetHelper`). They do **not** connect to a live MariaDB database. Real MariaDB integration testing remains a separate preflight requirement before production deployment.
+- **Database Safety:** Zero migrations created or executed. Zero remote database connections.
+
+

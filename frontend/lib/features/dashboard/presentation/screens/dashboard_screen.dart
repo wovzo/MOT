@@ -95,17 +95,17 @@ class DashboardScreen extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               children: [
                 // 1. Greeting & Gamification Bar
-                _buildHeader(context, summary),
+                _buildHeader(context, ref, summary),
                 const SizedBox(height: 16),
 
                 // 2. Active Focus Session Banner (if running or paused)
                 if (summary.activeSession != null) ...[
-                  _buildActiveSessionBanner(context, summary.activeSession!),
+                  _buildActiveSessionBanner(context, ref, summary.activeSession!),
                   const SizedBox(height: 16),
                 ],
 
                 // 3. Daily Study Goal Card
-                _buildDailyGoalCard(context, summary.dailyGoal),
+                _buildDailyGoalCard(context, ref, summary.dailyGoal),
                 const SizedBox(height: 16),
 
                 // 4. Weekly Activity Summary (7 Days)
@@ -117,11 +117,11 @@ class DashboardScreen extends ConsumerWidget {
                 const SizedBox(height: 16),
 
                 // 6. Subjects Overview
-                _buildSubjectsSection(context, summary.subjects),
+                _buildSubjectsSection(context, ref, summary.subjects),
                 const SizedBox(height: 16),
 
                 // 7. Recent Study Sessions
-                _buildRecentSessionsSection(context, summary.recentSessions),
+                _buildRecentSessionsSection(context, ref, summary.recentSessions),
                 const SizedBox(height: 24),
               ],
             ),
@@ -131,7 +131,7 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildHeader(BuildContext context, DashboardSummary summary) {
+  Widget _buildHeader(BuildContext context, WidgetRef ref, DashboardSummary summary) {
     final streak = summary.streak;
     final game = summary.gamification;
 
@@ -148,56 +148,61 @@ class DashboardScreen extends ConsumerWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Welcome back,',
-                    style: TextStyle(color: Colors.white60, fontSize: 13),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Scholar',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Welcome back,',
+                      style: TextStyle(color: Colors.white60, fontSize: 13),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Scholar',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                  ],
+                ),
               ),
 
               // Streak Badge
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: streak.isActiveToday
-                      ? AppTheme.streakAmber.withValues(alpha: 0.2)
-                      : Colors.white.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
+              Tooltip(
+                message: 'Habit Streak • Best: ${streak.longestStreak} days',
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
                     color: streak.isActiveToday
-                        ? AppTheme.streakAmber.withValues(alpha: 0.6)
-                        : Colors.white.withValues(alpha: 0.1),
+                        ? AppTheme.streakAmber.withValues(alpha: 0.2)
+                        : Colors.white.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: streak.isActiveToday
+                          ? AppTheme.streakAmber.withValues(alpha: 0.6)
+                          : Colors.white.withValues(alpha: 0.1),
+                    ),
                   ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.local_fire_department_rounded,
-                      color: streak.isActiveToday ? AppTheme.streakAmber : Colors.white54,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${streak.currentStreak} ${streak.currentStreak == 1 ? "Day" : "Days"}',
-                      style: TextStyle(
-                        color: streak.isActiveToday ? AppTheme.streakAmber : Colors.white70,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.local_fire_department_rounded,
+                        color: streak.isActiveToday ? AppTheme.streakAmber : Colors.white54,
+                        size: 20,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 4),
+                      Text(
+                        '${streak.currentStreak} ${streak.currentStreak == 1 ? "Day" : "Days"}',
+                        style: TextStyle(
+                          color: streak.isActiveToday ? AppTheme.streakAmber : Colors.white70,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -206,11 +211,12 @@ class DashboardScreen extends ConsumerWidget {
 
           // Gamification Level and XP progress
           InkWell(
-            onTap: () {
-              Navigator.push(
+            onTap: () async {
+              await Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const AchievementsScreen()),
               );
+              ref.invalidate(dashboardSummaryProvider);
             },
             borderRadius: BorderRadius.circular(12),
             child: Container(
@@ -279,7 +285,7 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildActiveSessionBanner(BuildContext context, StudySession session) {
+  Widget _buildActiveSessionBanner(BuildContext context, WidgetRef ref, StudySession session) {
     final statusText = session.isPaused ? 'PAUSED' : 'IN PROGRESS';
     final statusColor = session.isPaused ? AppTheme.streakAmber : AppTheme.growthTeal;
 
@@ -304,13 +310,16 @@ class DashboardScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                'ACTIVE STUDY SESSION • $statusText',
-                style: TextStyle(
-                  color: statusColor,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 11,
-                  letterSpacing: 0.5,
+              Expanded(
+                child: Text(
+                  'ACTIVE STUDY SESSION • $statusText',
+                  style: TextStyle(
+                    color: statusColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                    letterSpacing: 0.5,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -342,14 +351,15 @@ class DashboardScreen extends ConsumerWidget {
                 ),
               ),
               ElevatedButton.icon(
-                onPressed: () {
+                onPressed: () async {
                   if (onNavigateToTimer != null) {
                     onNavigateToTimer!();
                   } else {
-                    Navigator.push(
+                    await Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => const TimerScreen()),
                     );
+                    ref.invalidate(dashboardSummaryProvider);
                   }
                 },
                 style: ElevatedButton.styleFrom(
@@ -367,7 +377,7 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildDailyGoalCard(BuildContext context, dynamic goal) {
+  Widget _buildDailyGoalCard(BuildContext context, WidgetRef ref, dynamic goal) {
     final actual = goal.actualMinutes as int;
     final target = goal.targetMinutes as int;
     final remaining = goal.remainingMinutes as int;
@@ -387,33 +397,39 @@ class DashboardScreen extends ConsumerWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppTheme.growthTeal.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(10),
+              Expanded(
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.growthTeal.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.track_changes_rounded, color: AppTheme.growthTeal, size: 20),
                     ),
-                    child: const Icon(Icons.track_changes_rounded, color: AppTheme.growthTeal, size: 20),
-                  ),
-                  const SizedBox(width: 10),
-                  const Text(
-                    'Daily Study Goal',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                    const SizedBox(width: 10),
+                    const Flexible(
+                      child: Text(
+                        'Daily Study Goal',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
               InkWell(
-                onTap: () {
-                  Navigator.push(
+                onTap: () async {
+                  await Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const DailyGoalsScreen()),
                   );
+                  ref.invalidate(dashboardSummaryProvider);
                 },
                 borderRadius: BorderRadius.circular(8),
                 child: const Padding(
@@ -474,8 +490,8 @@ class DashboardScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 4),
                     if (isAchieved)
-                      Row(
-                        children: const [
+                      const Row(
+                        children: [
                           Icon(Icons.check_circle_rounded, color: AppTheme.growthTeal, size: 16),
                           SizedBox(width: 4),
                           Text(
@@ -521,14 +537,18 @@ class DashboardScreen extends ConsumerWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Weekly Focus Activity',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
+              const Expanded(
+                child: Text(
+                  'Weekly Focus Activity',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
+              const SizedBox(width: 8),
               Text(
                 '$totalWeekMinutes mins total',
                 style: const TextStyle(color: AppTheme.growthTeal, fontWeight: FontWeight.w600, fontSize: 13),
@@ -696,6 +716,11 @@ class DashboardScreen extends ConsumerWidget {
                     '${summary.habits.completionPercentage.toStringAsFixed(0)}% completed',
                     style: const TextStyle(color: AppTheme.focusPurple, fontSize: 11, fontWeight: FontWeight.w600),
                   ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Habit Streak: ${summary.streak.currentStreak}d',
+                    style: const TextStyle(color: Colors.white54, fontSize: 10),
+                  ),
                 ],
               ),
             ),
@@ -705,7 +730,7 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildSubjectsSection(BuildContext context, dynamic subjects) {
+  Widget _buildSubjectsSection(BuildContext context, WidgetRef ref, dynamic subjects) {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -728,11 +753,12 @@ class DashboardScreen extends ConsumerWidget {
                 ),
               ),
               InkWell(
-                onTap: () {
-                  Navigator.push(
+                onTap: () async {
+                  await Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const SubjectsScreen()),
                   );
+                  ref.invalidate(dashboardSummaryProvider);
                 },
                 borderRadius: BorderRadius.circular(8),
                 child: const Padding(
@@ -803,7 +829,7 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildRecentSessionsSection(BuildContext context, dynamic recentSessions) {
+  Widget _buildRecentSessionsSection(BuildContext context, WidgetRef ref, dynamic recentSessions) {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -826,14 +852,15 @@ class DashboardScreen extends ConsumerWidget {
                 ),
               ),
               InkWell(
-                onTap: () {
+                onTap: () async {
                   if (onNavigateToTimer != null) {
                     onNavigateToTimer!();
                   } else {
-                    Navigator.push(
+                    await Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => const TimerScreen()),
                     );
+                    ref.invalidate(dashboardSummaryProvider);
                   }
                 },
                 borderRadius: BorderRadius.circular(8),
