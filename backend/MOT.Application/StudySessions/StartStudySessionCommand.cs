@@ -39,27 +39,23 @@ namespace MOT.Application.StudySessions
                 throw new ActiveStudySessionAlreadyExistsException();
             }
 
+            var now = DateTime.UtcNow;
             var session = new StudySession
             {
                 UserId = userId,
                 ActiveUserId = userId,
                 Title = request.Title,
-                StartTime = DateTime.UtcNow,
+                StartTime = now,
+                LastResumedAt = now,
+                IsPaused = false,
+                AccumulatedSeconds = 0,
                 IsCompleted = false
             };
 
             _context.StudySessions.Add(session);
             await _context.SaveChangesAsync(cancellationToken);
 
-            return new StudySessionDto
-            {
-                Id = session.Id,
-                Title = session.Title,
-                StartTime = session.StartTime,
-                EndTime = session.EndTime,
-                DurationMinutes = session.DurationMinutes,
-                IsCompleted = session.IsCompleted
-            };
+            return session.ToDto(now);
         }
     }
 }

@@ -52,9 +52,20 @@ namespace MOT.Application.StudySessions
                     
                 if (!session.IsCompleted)
                 {
-                    session.EndTime = DateTime.UtcNow;
-                    session.DurationMinutes = Math.Max(0, (int)(session.EndTime.Value - session.StartTime).TotalMinutes);
+                    var now = DateTime.UtcNow;
+
+                    if (!session.IsPaused)
+                    {
+                        var resumedAt = session.LastResumedAt ?? session.StartTime;
+                        var activeElapsed = Math.Max(0, (int)(now - resumedAt).TotalSeconds);
+                        session.AccumulatedSeconds += activeElapsed;
+                    }
+
+                    session.EndTime = now;
+                    session.DurationMinutes = Math.Max(0, session.AccumulatedSeconds / 60);
                     session.IsCompleted = true;
+                    session.IsPaused = false;
+                    session.LastPausedAt = null;
                     session.ActiveUserId = null;
 
                     await _gamificationService.AwardStudySessionXpAsync(userId, session, cancellationToken);
@@ -75,15 +86,7 @@ namespace MOT.Application.StudySessions
                     }
                 }
 
-                return new StudySessionDto
-                {
-                    Id = session.Id,
-                    Title = session.Title,
-                    StartTime = session.StartTime,
-                    EndTime = session.EndTime,
-                    DurationMinutes = session.DurationMinutes,
-                    IsCompleted = session.IsCompleted
-                };
+                return session.ToDto();
             }
         }
     }

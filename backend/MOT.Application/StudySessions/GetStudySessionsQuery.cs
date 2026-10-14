@@ -40,7 +40,11 @@ namespace MOT.Application.StudySessions
                     StartTime = session.StartTime,
                     EndTime = session.EndTime,
                     DurationMinutes = session.DurationMinutes,
-                    IsCompleted = session.IsCompleted
+                    IsCompleted = session.IsCompleted,
+                    IsPaused = session.IsPaused,
+                    LastPausedAt = session.LastPausedAt,
+                    AccumulatedSeconds = session.AccumulatedSeconds,
+                    ElapsedSeconds = session.AccumulatedSeconds > 0 ? session.AccumulatedSeconds : session.DurationMinutes * 60
                 })
                 .ToListAsync(cancellationToken);
         }

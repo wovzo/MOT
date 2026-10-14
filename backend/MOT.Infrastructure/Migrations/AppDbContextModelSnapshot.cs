@@ -146,6 +146,11 @@ namespace MOT.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("char(36)");
 
+                    b.Property<int>("AccumulatedSeconds")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
                     b.Property<Guid?>("ActiveUserId")
                         .HasColumnType("char(36)");
 
@@ -157,6 +162,17 @@ namespace MOT.Infrastructure.Migrations
 
                     b.Property<bool>("IsCompleted")
                         .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("IsPaused")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint(1)")
+                        .HasDefaultValue(false);
+
+                    b.Property<DateTime?>("LastPausedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime?>("LastResumedAt")
+                        .HasColumnType("datetime(6)");
 
                     b.Property<DateTime>("StartTime")
                         .HasColumnType("datetime(6)");

@@ -37,15 +37,7 @@ namespace MOT.Application.StudySessions
             if (session == null)
                 return null;
 
-            return new StudySessionDto
-            {
-                Id = session.Id,
-                Title = session.Title,
-                StartTime = session.StartTime,
-                EndTime = session.EndTime,
-                DurationMinutes = session.DurationMinutes,
-                IsCompleted = session.IsCompleted
-            };
+            return session.ToDto();
         }
     }
 }

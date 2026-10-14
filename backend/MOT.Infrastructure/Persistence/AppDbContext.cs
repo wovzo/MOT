@@ -51,6 +51,11 @@ public class AppDbContext : DbContext, IAppDbContext
                   .IsRequired(false);
             entity.HasIndex(e => e.ActiveUserId)
                   .IsUnique();
+
+            entity.Property(e => e.IsPaused)
+                  .HasDefaultValue(false);
+            entity.Property(e => e.AccumulatedSeconds)
+                  .HasDefaultValue(0);
         });
 
         modelBuilder.Entity<RoomParticipant>(entity =>

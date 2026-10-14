@@ -44,6 +44,24 @@ class StudySessionRepository {
     }
   }
 
+  Future<StudySession> pauseSession(String sessionId) async {
+    try {
+      final response = await _networkClient.dio.post('studysessions/$sessionId/pause');
+      return StudySession.fromJson(response.data);
+    } on DioException catch (e) {
+      throw Exception(_extractErrorMessage(e, 'Failed to pause study session'));
+    }
+  }
+
+  Future<StudySession> resumeSession(String sessionId) async {
+    try {
+      final response = await _networkClient.dio.post('studysessions/$sessionId/resume');
+      return StudySession.fromJson(response.data);
+    } on DioException catch (e) {
+      throw Exception(_extractErrorMessage(e, 'Failed to resume study session'));
+    }
+  }
+
   Future<StudySession> endSession(String sessionId) async {
     try {
       final response = await _networkClient.dio.post('studysessions/$sessionId/end');
@@ -55,8 +73,11 @@ class StudySessionRepository {
 
   String _extractErrorMessage(DioException e, String defaultMessage) {
     final data = e.response?.data;
-    if (data is Map && data['error'] != null && data['error'].toString().isNotEmpty) {
-      return data['error'].toString();
+    if (data is Map) {
+      final msg = data['error'] ?? data['Error'] ?? data['message'] ?? data['Message'];
+      if (msg != null && msg.toString().trim().isNotEmpty) {
+        return msg.toString().trim();
+      }
     }
     return defaultMessage;
   }

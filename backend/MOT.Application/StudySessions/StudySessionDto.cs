@@ -10,5 +10,9 @@ namespace MOT.Application.StudySessions
         public DateTime? EndTime { get; set; }
         public int DurationMinutes { get; set; }
         public bool IsCompleted { get; set; }
+        public bool IsPaused { get; set; }
+        public DateTime? LastPausedAt { get; set; }
+        public int AccumulatedSeconds { get; set; }
+        public int ElapsedSeconds { get; set; }
     }
 }

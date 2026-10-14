@@ -1554,3 +1554,846 @@ Before applying migrations or booting an updated API container against staging/p
    - **Pre-Migration Data Risks:** If the remote database has existing duplicate habit completions or unclosed study sessions, the automatic `dbContext.Database.Migrate()` on startup will crash with Error 1062. Pre-migration deduplication SQL scripts must be executed before deployment.
    - **Horizontal Multi-Instance Scaling Limitation:** Distributed concurrency safety across multiple API container replicas is not yet database-backed (currently in-process via `SemaphoreSlim`). The production environment must run as a single container instance until distributed locks or concurrency tokens are deployed.
 
+---
+
+## Phase 8 — Staging Deployment Preflight and Migration Safety Review
+
+**Review Status: COMPLETE (READY FOR OPERATOR REVIEW & APPROVAL)**  
+**Target Environment:** Staging Isolated Environment  
+**Execution Policy:** Strict Zero-Database Mutation (No remote queries, no schema changes, no migration applications executed in this task)
+
+---
+
+### 1. Deployment Configuration & Startup Decoupling Analysis
+
+#### A. Current Startup & Migration Behavior
+- **Inspection of `Program.cs` (lines 116–120):**
+  ```csharp
+  using (var scope = app.Services.CreateScope())
+  {
+      var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+      dbContext.Database.Migrate();
+  }
+  ```
+  `dbContext.Database.Migrate()` is currently executed unconditionally inside `Program.cs` during application startup.
+  - **Risk:** Whenever any API container or local process boots, EF Core automatically discovers all pending migrations and executes their `Up()` scripts against the target database before any HTTP request is served.
+  - If unhandled data anomalies (such as duplicate habit completions or multiple active sessions) exist in the target database, container startup will immediately throw a fatal `DbUpdateException` (MySQL Error 1062) and terminate the application process in a crash loop.
+
+#### B. Connection String Resolution & Cross-Environment Contamination Risk
+- **Inspection of `Program.cs` (lines 65–67):**
+  ```csharp
+  var connectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING") 
+                         ?? builder.Configuration.GetConnectionString("DefaultConnection") 
+                         ?? throw new InvalidOperationException("Connection string not found.");
+  ```
+  - **Critical Contamination Hazard:** `appsettings.json` contains a fallback connection string pointing to `mysql.gb.stackcp.com`.
+  - If a staging container is provisioned without `DB_CONNECTION_STRING` explicitly injected (or if the environment variable name is misspelled), the application silently falls back to the production database host in `appsettings.json`.
+  - Combined with the unconditional `dbContext.Database.Migrate()` on startup, **a misconfigured staging deployment could inadvertently apply schema migrations directly to the production database.**
+
+#### C. Proposed Code & Configuration Changes (Pre-Deployment Guardrail)
+To eliminate startup risks, the following two changes are proposed for operator approval prior to staging deployment:
+
+1. **Decouple Migrations from Web Application Startup:**
+   Modify `Program.cs` to gate migration execution behind an explicit environment variable:
+   ```csharp
+   // Only execute schema migrations if explicitly requested by an operator
+   var applyMigrations = string.Equals(
+       Environment.GetEnvironmentVariable("APPLY_MIGRATIONS_ON_STARTUP"), 
+       "true", 
+       StringComparison.OrdinalIgnoreCase);
+
+   if (applyMigrations)
+   {
+       using (var scope = app.Services.CreateScope())
+       {
+           var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+           dbContext.Database.Migrate();
+       }
+   }
+   ```
+   *Impact:* Web API containers boot with `APPLY_MIGRATIONS_ON_STARTUP=false` (default), ensuring that container restarts never run DDL or alter database state. Migrations become an intentional, operator-controlled execution step.
+
+2. **Prevent Accidental Fallback to Production Connection String:**
+   In `Program.cs`, in non-development environments (`!app.Environment.IsDevelopment()`), require `DB_CONNECTION_STRING` from the environment and forbid falling back to `appsettings.json`:
+   ```csharp
+   var connectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING");
+   if (string.IsNullOrWhiteSpace(connectionString))
+   {
+       if (builder.Environment.IsDevelopment())
+       {
+           connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+       }
+       else
+       {
+           throw new InvalidOperationException(
+               "CRITICAL: DB_CONNECTION_STRING environment variable is required in non-development environments. Startup aborted to prevent cross-environment targeting.");
+       }
+   }
+   ```
+   *Impact:* Completely prevents a staging or production container from accidentally communicating with or modifying an unintended database.
+
+#### D. Single API Instance Deployment Requirement
+- Because user-level concurrency serialization relies on in-memory `UserConcurrencyLock` (`SemaphoreSlim`), the staging and production deployment configurations must enforce **exactly one container replica**:
+  - **Render Web Service:** Set instance count to `1` (disable auto-scaling).
+  - **Docker Compose:** `deploy.replicas: 1`.
+  - **Kubernetes:** `spec.replicas: 1`.
+
+---
+
+### 2. Comprehensive Pending Migration Review
+
+The repository contains 9 total migrations. The first 4 were previously applied. The following 5 migrations are **pending deployment**:
+
+```
+[Previously Applied]
+  1. 20260909161703_AddHabits
+  2. 20261002081502_AddStudySessions
+  3. 20261006061237_AddRoomParticipants
+  4. 20261006064106_AddSingleActiveStudySessionConstraint
+
+[Pending Deployment]
+  5. 20261012110919_FixStudySessionActiveUserIdColumn
+  6. 20261012121819_AddRoomParticipantConstraints
+  7. 20261012175608_AddUniqueIndexToHabitCompletions
+  8. 20261013113448_AddXpTransactionsLedger
+  9. 20261013145328_AddUserAchievementsTable
+```
+
+#### Detailed Inspection of Each Pending Migration
+
+#### 1. `20261012110919_FixStudySessionActiveUserIdColumn`
+- **Target Table:** `StudySessions`
+- **`Up` Operations:**
+  1. Inspects `INFORMATION_SCHEMA.COLUMNS`; dynamically executes `ALTER TABLE StudySessions ADD ActiveUserId char(36) COLLATE ascii_general_ci NULL` (or `MODIFY COLUMN` if already partially present).
+  2. Backfills: `UPDATE StudySessions SET ActiveUserId = UserId WHERE IsCompleted = 0 AND EndTime IS NULL;`
+  3. Inspects `INFORMATION_SCHEMA.STATISTICS`; dynamically creates unique index `IX_StudySessions_ActiveUserId` on `(ActiveUserId)`.
+- **Unique Index Prerequisite:** Non-null values of `ActiveUserId` must be unique. If any user has $\ge 2$ rows where `IsCompleted = 0 AND EndTime IS NULL`, the backfill statement assigns identical `ActiveUserId` values, causing `CREATE UNIQUE INDEX` to fail with error 1062.
+- **MariaDB 10.11 Compatibility:** Fully compatible; uses prepared dynamic SQL. In MariaDB/MySQL, DDL statements cause an implicit transaction commit.
+- **Rollback (`Down`) Limitations:** Drops unique index and drops column `ActiveUserId`. Reversible, but dropping the column clears all active session tracking data.
+
+#### 2. `20261012121819_AddRoomParticipantConstraints`
+- **Target Table:** `RoomParticipants`
+- **`Up` Operations:**
+  1. Alters `Username` from `longtext` to `varchar(100)` utf8mb4.
+  2. Alters `RoomName` from `longtext` to `varchar(100)` utf8mb4.
+  3. Creates unique index `IX_RoomParticipants_RoomName_SeatNumber` on `(RoomName, SeatNumber)`.
+  4. Creates unique index `IX_RoomParticipants_RoomName_UserId` on `(RoomName, UserId)`.
+- **Prerequisites & Risks:** If existing data has usernames or room names longer than 100 characters, column modification will fail with `Data too long for column`. If duplicate seats or duplicate user sessions exist in the same room, unique index creation fails with error 1062.
+- **MariaDB 10.11 Compatibility:** Fully compatible.
+- **Rollback (`Down`) Limitations:** Drops unique indexes and alters columns back to `longtext`. Safely reversible.
+
+#### 3. `20261012175608_AddUniqueIndexToHabitCompletions`
+- **Target Table:** `HabitCompletions`
+- **`Up` Operations:**
+  1. Creates composite unique index `IX_HabitCompletions_HabitId_Date` on `(HabitId, Date)`.
+  2. Drops redundant single-column index `IX_HabitCompletions_HabitId`.
+- **Unique Index Prerequisite:** No two rows may have the same `(HabitId, Date)`. Any historical duplicates will immediately trigger error 1062.
+- **Ordering & Dependency Safeguard:** The composite unique index is created *before* the single-column index is dropped. This satisfies InnoDB's requirement that the foreign key `FK_HabitCompletions_Habits_HabitId` has a covering index on its leading column at all times.
+- **MariaDB 10.11 Compatibility:** Fully compatible.
+- **Rollback (`Down`) Limitations:** Recreates single-column index and drops composite unique index. Safely reversible.
+
+#### 4. `20261013113448_AddXpTransactionsLedger`
+- **Target Table:** `XpTransactions` (New Table)
+- **`Up` Operations:**
+  1. Creates table `XpTransactions` (`Id char(36)`, `UserId char(36)`, `Amount int`, `SourceType varchar(32)`, `SourceId varchar(64)`, `Description varchar(200)`, `CreatedAt datetime(6)`).
+  2. Creates foreign key `FK_XpTransactions_Users_UserId` referencing `Users(Id)` with `ON DELETE CASCADE`.
+  3. Creates index `IX_XpTransactions_UserId_CreatedAt`.
+  4. Creates composite unique index `IX_XpTransactions_UserId_SourceType_SourceId`.
+- **Prerequisites & Risks:** Zero migration risk during `Up` because the table is brand new.
+- **CRITICAL ROLLBACK LIMITATION (`Down`):** `migrationBuilder.DropTable("XpTransactions");`
+  - If the application runs in staging and awards XP, rolling back this migration drops the table and **permanently destroys all user XP ledger history.**
+
+#### 5. `20261013145328_AddUserAchievementsTable`
+- **Target Table:** `UserAchievements` (New Table)
+- **`Up` Operations:**
+  1. Creates table `UserAchievements` (`Id char(36)`, `UserId char(36)`, `AchievementCode varchar(64)`, `UnlockedAt datetime(6)`, `XpAwarded int`).
+  2. Creates foreign key `FK_UserAchievements_Users_UserId` referencing `Users(Id)` with `ON DELETE CASCADE`.
+  3. Creates composite unique index `IX_UserAchievements_UserId_AchievementCode`.
+  4. Creates index `IX_UserAchievements_UserId_UnlockedAt`.
+- **Prerequisites & Risks:** Zero migration risk during `Up` because the table is brand new.
+- **CRITICAL ROLLBACK LIMITATION (`Down`):** `migrationBuilder.DropTable("UserAchievements");`
+  - Rolling back this migration drops the table and **permanently destroys all unlocked user achievement records.**
+
+---
+
+### 3. Read-Only SQL Preflight Review Document
+
+The following read-only `SELECT` queries must be executed by an operator against the target staging database before applying any migrations. No writes, updates, or deletions are performed by these queries.
+
+#### Preflight Query 1: Detect Users with Multiple Incomplete / Active Study Sessions
+```sql
+SELECT 
+    s.UserId,
+    u.Email,
+    u.DisplayName,
+    COUNT(*) AS ActiveSessionCount,
+    MIN(s.StartTime) AS OldestSessionStartTime,
+    MAX(s.StartTime) AS NewestSessionStartTime,
+    GROUP_CONCAT(s.Id ORDER BY s.StartTime DESC SEPARATOR ', ') AS SessionIds
+FROM StudySessions s
+LEFT JOIN Users u ON s.UserId = u.Id
+WHERE s.IsCompleted = 0 AND s.EndTime IS NULL
+GROUP BY s.UserId, u.Email, u.DisplayName
+HAVING COUNT(*) > 1;
+```
+- **What the Result Means:**
+  - *0 Rows:* No users have concurrent unclosed sessions. Migration 5 will backfill and create `IX_StudySessions_ActiveUserId` cleanly.
+  - *$\ge 1$ Rows:* Violations exist. The backfill statement in Migration 5 would populate duplicate non-null `ActiveUserId` values, aborting migration with error 1062.
+- **Decision Needed Before Remediation:** The operator must review the returned `SessionIds` to determine which session represents genuine active focus versus abandoned sessions.
+
+#### Preflight Query 2: Detect Duplicate Habit Completions on the Same Calendar Date
+```sql
+SELECT 
+    c.HabitId,
+    h.Title AS HabitTitle,
+    h.UserId,
+    c.Date,
+    COUNT(*) AS DuplicateCount,
+    GROUP_CONCAT(c.Id ORDER BY c.Id ASC SEPARATOR ', ') AS CompletionIds
+FROM HabitCompletions c
+LEFT JOIN Habits h ON c.HabitId = h.Id
+GROUP BY c.HabitId, h.Title, h.UserId, c.Date
+HAVING COUNT(*) > 1;
+```
+- **What the Result Means:**
+  - *0 Rows:* All habit completions are unique by date. Migration 7 will create `IX_HabitCompletions_HabitId_Date` cleanly.
+  - *$\ge 1$ Rows:* Historical duplicate completions exist for the same habit and date. Migration 7 will abort with error 1062.
+- **Decision Needed Before Remediation:** Operator must decide which specific completion record to preserve and verify whether duplicates artificially impacted user streaks.
+
+#### Preflight Query 3: Detect Multiple Participants Claiming the Same Seat in a Classroom
+```sql
+SELECT 
+    RoomName,
+    SeatNumber,
+    COUNT(*) AS OccupantCount,
+    GROUP_CONCAT(Username SEPARATOR ', ') AS Usernames,
+    GROUP_CONCAT(UserId SEPARATOR ', ') AS UserIds,
+    GROUP_CONCAT(Id SEPARATOR ', ') AS ParticipantIds
+FROM RoomParticipants
+GROUP BY RoomName, SeatNumber
+HAVING COUNT(*) > 1;
+```
+- **What the Result Means:**
+  - *0 Rows:* All assigned seats in all classrooms are distinct. Migration 6 will create `IX_RoomParticipants_RoomName_SeatNumber` cleanly.
+  - *$\ge 1$ Rows:* Multiple participant records claim the identical seat number in a room. Migration 6 will abort with error 1062.
+- **Decision Needed Before Remediation:** Check if any of the participants are actively connected or if they are stale ghost sessions.
+
+#### Preflight Query 4: Detect a Single User Occupying Multiple Seats in the Same Classroom
+```sql
+SELECT 
+    RoomName,
+    UserId,
+    COUNT(*) AS UserSeatCount,
+    GROUP_CONCAT(SeatNumber SEPARATOR ', ') AS SeatNumbers,
+    GROUP_CONCAT(Id SEPARATOR ', ') AS ParticipantIds
+FROM RoomParticipants
+GROUP BY RoomName, UserId
+HAVING COUNT(*) > 1;
+```
+- **What the Result Means:**
+  - *0 Rows:* No user holds multiple seats in the same room. Migration 6 will create `IX_RoomParticipants_RoomName_UserId` cleanly.
+  - *$\ge 1$ Rows:* A user has multiple concurrent participant rows in one room. Migration 6 will abort with error 1062.
+- **Decision Needed Before Remediation:** Identify which seat belongs to the active connection.
+
+#### Preflight Query 5: Detect Classroom Column Values Exceeding 100 Characters
+```sql
+SELECT 
+    Id,
+    RoomName,
+    LENGTH(RoomName) AS RoomNameBytes,
+    CHAR_LENGTH(RoomName) AS RoomNameChars,
+    Username,
+    LENGTH(Username) AS UsernameBytes,
+    CHAR_LENGTH(Username) AS UsernameChars
+FROM RoomParticipants
+WHERE CHAR_LENGTH(RoomName) > 100 OR CHAR_LENGTH(Username) > 100;
+```
+- **What the Result Means:**
+  - *0 Rows:* Altering `Username` and `RoomName` to `varchar(100)` in Migration 6 will succeed without truncation.
+  - *$\ge 1$ Rows:* Data exceeds 100 characters; altering column type will fail with data truncation error.
+- **Decision Needed Before Remediation:** Inspect and trim offending strings before migration.
+
+#### Preflight Query 6: Relational Integrity & Orphan Record Check
+```sql
+-- 6A: StudySessions referencing non-existent Users
+SELECT s.Id AS OrphanSessionId, s.UserId, s.StartTime 
+FROM StudySessions s
+LEFT JOIN Users u ON s.UserId = u.Id
+WHERE u.Id IS NULL;
+
+-- 6B: HabitCompletions referencing non-existent Habits
+SELECT c.Id AS OrphanCompletionId, c.HabitId, c.Date 
+FROM HabitCompletions c
+LEFT JOIN Habits h ON c.HabitId = h.Id
+WHERE h.Id IS NULL;
+
+-- 6C: Habits referencing non-existent Users
+SELECT h.Id AS OrphanHabitId, h.UserId, h.Title 
+FROM Habits h
+LEFT JOIN Users u ON h.UserId = u.Id
+WHERE u.Id IS NULL;
+
+-- 6D: DailyTasks referencing non-existent Users
+SELECT t.Id AS OrphanTaskId, t.UserId, t.Title 
+FROM Tasks t
+LEFT JOIN Users u ON t.UserId = u.Id
+WHERE u.Id IS NULL;
+```
+- **What the Result Means:**
+  - *0 Rows:* All existing foreign key relationships are strictly consistent.
+  - *$\ge 1$ Rows:* Orphan records exist in legacy data.
+- **Decision Needed Before Remediation:** Investigate source of orphan records before applying foreign key cascades in new tables.
+
+---
+
+### 4. Challenge and Critique of Previous Cleanup Recommendations
+
+The previous release-readiness audit proposed three database cleanup operations. Under rigorous review, **none of the three operations should be accepted as safe default actions.**
+
+#### Challenge 1: Marking Duplicate Active Sessions as `IsCompleted = 1, EndTime = StartTime`
+- **Previous Proposal:** `UPDATE StudySessions SET IsCompleted = 1, EndTime = StartTime WHERE ...`
+- **Critical Defects & Adverse Impacts:**
+  1. *Analytics Falsification:* In Focus Analytics (`GetFocusAnalyticsSummaryQuery`), `CompletedSessionsCount` counts all sessions where `s.EndTime != null && s.IsCompleted`. Marking abandoned sessions as `IsCompleted = 1` artificially inflates `CompletedSessionsCount`, which severely depresses `AverageSessionMinutes` (`TotalFocusMinutes / CompletedSessionsCount`).
+  2. *Data Inaccuracy:* Abandoned sessions were *never* completed. Forcing `IsCompleted = 1` corrupts the historical domain audit trail.
+- **Preservation-First Remediation Strategy:**
+  - **Do NOT mark `IsCompleted = 1`!**
+  - Instead, mark abandoned older sessions as **abandoned/closed without completion**:
+    `SET EndTime = StartTime, IsCompleted = 0, ActiveUserId = NULL`
+  - *Why this is superior:*
+    - `EndTime IS NULL` is now false, so Migration 5's backfill ignores the abandoned row and does NOT assign `ActiveUserId`.
+    - `IsCompleted` remains `0`, so Focus Analytics correctly classifies it as an incomplete session and does not distort `CompletedSessionsCount` or `AverageSessionMinutes`.
+    - Only the single genuine active session (the most recent one) retains `EndTime = NULL` and receives `ActiveUserId = UserId`.
+
+#### Challenge 2: Deleting Duplicate Habit Completions by `Id > c2.Id`
+- **Previous Proposal:** `DELETE c1 FROM HabitCompletions c1 INNER JOIN HabitCompletions c2 WHERE c1.HabitId = c2.HabitId AND c1.Date = c2.Date AND c1.Id > c2.Id;`
+- **Critical Defects & Adverse Impacts:**
+  1. *Arbitrary Deletion:* `Id` is a `char(36)` GUID generated by `Guid.NewGuid()`. Comparing `c1.Id > c2.Id` compares random hexadecimal characters, NOT timestamps or sequence numbers. This deletes an arbitrary record.
+  2. *Irreversible Data Loss without Audit Trail:* Deleting directly from `HabitCompletions` destroys historical completion records without preserving proof of what was removed.
+- **Preservation-First Remediation Strategy:**
+  - **Step 1 (Pre-Archival):** Before touching any record, copy all identified duplicate completions to an audit archive table:
+    ```sql
+    CREATE TABLE IF NOT EXISTS `_Archive_Duplicate_HabitCompletions` LIKE HabitCompletions;
+    INSERT INTO `_Archive_Duplicate_HabitCompletions`
+    SELECT * FROM HabitCompletions WHERE Id IN (...duplicate IDs identified by Preflight Query 2...);
+    ```
+  - **Step 2 (Human Verification):** Operator reviews the archive rows and verifies user streak impacts.
+  - **Step 3 (Targeted Deduplication):** Explicitly retain one confirmed ID per `(HabitId, Date)` and delete only the archived redundant IDs.
+
+#### Challenge 3: Truncating the Entire `RoomParticipants` Table
+- **Previous Proposal:** `TRUNCATE TABLE RoomParticipants;`
+- **Critical Defects & Adverse Impacts:**
+  1. *Active User Disruption:* `TRUNCATE` unilaterally kicks out any student currently participating in a live virtual study classroom, causing socket drops and video disconnects.
+  2. *Non-Transactional DDL:* In MySQL/MariaDB, `TRUNCATE TABLE` is a DDL statement that causes an implicit commit and cannot be rolled back inside a transaction.
+- **Preservation-First Remediation Strategy:**
+  - Check Preflight Queries 3, 4, and 5 first.
+  - If Preflight Queries 3, 4, and 5 return 0 rows, **no cleanup of `RoomParticipants` is needed at all!** The migration will succeed with zero data alteration.
+  - If conflicts exist, surgically remove only the stale records (participants with no heartbeat in the last 10 minutes) or resolve duplicate seat numbers without clearing active participants.
+  - A full clear of `RoomParticipants` should only occur during a formal, announced maintenance window when the application is in maintenance mode.
+
+---
+
+### 5. Staging Deployment Plan (Step-by-Step Runbook)
+
+```
+[Phase 1: Environment Isolation & Verification]
+  Step 1: Verify staging database connection string is isolated from production.
+  Step 2: Verify single API instance configuration (replicas: 1).
+  Step 3: Perform full logical backup of staging database.
+
+[Phase 2: Preflight Inspection & Gated Remediation]
+  Step 4: Execute Read-Only Preflight Queries 1 through 6 against staging DB.
+  Step 5: If any query returns rows, execute preservation-first remediation with audit archiving.
+  Step 6: Re-run Preflight Queries to confirm 0 conflicts remain.
+
+[Phase 3: Migration Execution]
+  Step 7: Generate migration script locally: `dotnet ef migrations script 20261006064106 ...`
+  Step 8: Operator inspects generated SQL and executes migration update against staging DB.
+  Step 9: Verify `__EFMigrationsHistory` contains all 9 migrations.
+
+[Phase 4: API Deployment & Verification]
+  Step 10: Deploy staging API container with `APPLY_MIGRATIONS_ON_STARTUP=false`.
+  Step 11: Execute automated smoke test suite (Auth, Tasks, Habits, Sessions, Analytics, XP, Achievements).
+  Step 12: Verify rollback runbook and document staging sign-off.
+```
+
+#### Detailed Step Specifications:
+
+1. **Confirm Environment Isolation:**
+   - Verify `DB_CONNECTION_STRING` on the staging host points to the dedicated staging database instance.
+   - Verify that `DefaultConnection` in `appsettings.json` is not referenced by the staging environment.
+2. **Execute Full Database Backup:**
+   - Run full logical dump: `mysqldump -h <staging-host> -u <user> -p --single-transaction --routines --triggers <staging-db> > mot_staging_pre_migration_backup.sql`.
+   - Verify backup file size and integrity.
+3. **Execute Read-Only Preflight Queries:**
+   - Run Preflight Queries 1, 2, 3, 4, 5, and 6. Record query outputs in deployment log.
+4. **Gated Remediation (If and Only If Conflicts Found):**
+   - If Query 1 returns rows: apply preservation-first update setting `EndTime = StartTime, IsCompleted = 0` on older abandoned sessions.
+   - If Query 2 returns rows: archive duplicate rows to `_Archive_Duplicate_HabitCompletions` and remove redundant records.
+   - If Query 3/4 returns rows: remove stale participants with expired heartbeats.
+   - Re-run preflight queries to confirm 0 rows returned.
+5. **Generate & Inspect Migration SQL:**
+   - Run local script generation without connecting to database:
+     `dotnet ef migrations script 20261006064106 --project backend/MOT.Infrastructure/MOT.Infrastructure.csproj --startup-project backend/MOT.Api/MOT.Api.csproj -o staging_migrations.sql`
+   - Operator reviews `staging_migrations.sql` to confirm DDL matches expected operations.
+6. **Apply Migrations Explicitly:**
+   - Execute migration via migration bundle or `dotnet ef database update` with staging connection string.
+   - Query `SELECT MigrationId FROM __EFMigrationsHistory;` to verify all 5 pending migrations are recorded.
+7. **Deploy Single API Instance:**
+   - Deploy API container configured with:
+     - `APPLY_MIGRATIONS_ON_STARTUP=false`
+     - Replicas / Instance count = `1`
+     - `ASPNETCORE_ENVIRONMENT=Staging`
+8. **Staging Smoke Test Verification:**
+   - Verify API health endpoint responds HTTP 200.
+   - Verify login, registration, and JWT token issuance.
+   - Start and end a study session; verify single active session constraint.
+   - Toggle daily task; verify 15 XP award in `XpTransactions` and `User.XP`.
+   - Toggle habit completion; verify 20 XP award and streak evaluation.
+   - Verify `GET /api/gamification/summary` reflects exact level formula.
+   - Verify `GET /api/gamification/achievements` returns 8 catalog badges.
+   - Verify `GET /api/analytics/summary` focus minutes parity.
+9. **Rollback & Database Recovery Limitations:**
+   - **Important Constraint:** In MySQL/MariaDB, DDL statements cause an implicit commit. A failed DDL migration cannot be rolled back via an ambient SQL transaction.
+   - If a migration fails mid-way:
+     - Do not re-run blindly.
+     - Inspect `__EFMigrationsHistory` to determine which migrations committed.
+     - If schema state is inconsistent, restore from `mot_staging_pre_migration_backup.sql`.
+   - **Post-Go-Live Rollback Warning:** Rolling back Migration 8 (`XpTransactions`) or Migration 9 (`UserAchievements`) executes `DROP TABLE`, permanently destroying all user XP transactions and achievement unlocks accumulated during staging.
+
+---
+
+### 6. Remaining Blockers and Required Approvals
+
+Prior to executing the staging deployment runbook, explicit human operator approval is required for:
+
+| Approval Item | Description | Required Sign-Off |
+|---|---|---|
+| **Approval A: Startup Decoupling** | Approval to update `Program.cs` to gate `Database.Migrate()` behind `APPLY_MIGRATIONS_ON_STARTUP` and enforce non-dev `DB_CONNECTION_STRING`. | Lead Engineer / DevOps |
+| **Approval B: Staging DB Isolation** | Confirmation that staging database host/credentials are 100% physically isolated from production. | DevOps / DBA |
+| **Approval C: Preflight SQL Results** | Review of output from Read-Only Preflight Queries 1–6 against staging database. | Lead Engineer / DBA |
+| **Approval D: Remediation Plan (If Needed)** | Record-level review of any data corrections if Preflight Queries 1–6 identify conflicts. | Lead Engineer / Product Owner |
+| **Approval E: Migration Execution** | Authorization to execute `dotnet ef database update` on staging database. | Release Manager |
+
+---
+
+
+
+
+## Comprehensive Backend Readiness Audit (October 14, 2026)
+
+**Audit Role:** Senior ASP.NET Core Backend Architect, QA Engineer, Database Engineer, Application Security Reviewer  
+**Audit Objective:** Independent, evidence-based readiness evaluation across Architecture, Security, Data Layer, Domain Logic, API Contracts, Test Quality, and Operational Deployment.  
+**Stack Invariant Preserved:** Flutter, ASP.NET Core (.NET 8.0), EF Core 8.0, Pomelo MySQL/MariaDB provider (target MariaDB 10.11), Clean Architecture, CQRS/MediatR, FluentValidation.  
+**Execution Policy:** Strict Zero-Database Mutation (No remote queries, no schema changes, no migration applications, zero secrets exposed).
+
+---
+
+### 1. Executive Verdict
+
+### **Verdict: READY FOR CONTROLLED STAGING (BLOCKED FROM PRODUCTION)**
+
+#### Detailed Rationale:
+1. **Why Local and Controlled Staging are Ready:**
+   - **Solid Domain and Clean Architecture Foundation:** Core domain entities, MediatR handlers, validation behaviors, and repositories are fully implemented for Authentication, Tasks, Habits, Study Sessions, Focus Analytics, and Gamification (XP Ledger + Achievements).
+   - **100% Mocked Test Pass Rate:** 462/462 backend unit tests pass without errors or regressions.
+   - **Clean EF Core Model Synchronization:** `dotnet ef migrations has-pending-model-changes` reports 0 pending model changes. The C# domain model and EF Core model snapshot match completely.
+   - **Strict Ownership and Authorization:** Every authenticated endpoint resolves tenant identity exclusively from `ICurrentUserService.UserId` (claims-based JWT). Cross-tenant queries and mutations are isolated.
+
+2. **Why Production Deployment is Blocked (P0 Blockers):**
+   - **CRITICAL / P0-1: Secrets Committed in Source Control:** Database connection credentials and JWT signing secret are stored directly in `backend/MOT.Api/appsettings.json` lines 10 and 13.
+   - **CRITICAL / P0-2: Automatic Unconditional Startup Migrations:** `Program.cs` lines 116–120 executes `dbContext.Database.Migrate()` on application boot. If uncleaned duplicate data exists in MariaDB, the container crashes in a fatal restart loop.
+   - **CRITICAL / P0-3: Silent Fallback to Production Connection String:** `Program.cs` line 66 falls back to `appsettings.json` if `DB_CONNECTION_STRING` is unset, risking inadvertent mutation of production from staging.
+   - **HIGH / P0-4: 5 Pending Remote Database Migrations:** Migrations 5 through 9 have never been applied to the remote MariaDB database. Unique indexes on `StudySessions`, `HabitCompletions`, and `RoomParticipants` require preflight data verification.
+   - **HIGH / P0-5: In-Process Concurrency Barrier:** Concurrency serialization relies on `UserConcurrencyLock` (`SemaphoreSlim`), which is strictly in-process. Production must be pinned to `replicas: 1` until distributed locking or optimistic concurrency tokens are implemented.
+   - **HIGH / P0-6: Missing Health Checks:** Zero health check endpoints exist (`/health`, `/healthz`), preventing load balancers and container orchestrators from validating service availability.
+
+---
+
+### 2. Backend Capability Summary
+
+| Area | Implemented Capabilities | Baseline Architecture |
+|---|---|---|
+| **Authentication & Profile** | PBKDF2 password hashing with salt; JWT issuance (7-day validity); registration; login; current user query (`GET /api/auth/me`); authenticated display name update (`PUT /api/auth/profile`); authenticated password change with current password verification; authenticated account deletion with cascade cleanup; disabled public password reset. | `AuthController`, `AuthRepository`, `PasswordHasher`, `JwtProvider`, `CurrentUserService`. |
+| **Daily Tasks** | Full CRUD: create task, list tasks (scoped to user), get task by ID, update title/description, delete task, toggle completion with idempotency and XP awards. | `TasksController`, `DailyTask`, MediatR commands/queries/validators. |
+| **Habits & Streaks** | Full CRUD: create habit, list habits with dynamic streaks, get habit by ID, update title/description, delete habit, daily toggle with UTC date scoping and idempotency. | `HabitsController`, `Habit`, `HabitCompletion`, `HabitStreakCalculator`. |
+| **Study Sessions** | Start session (enforcing single active session constraint), end session (calculates duration via server UTC timestamps, prevents negative duration, marks complete), list sessions, get active session. | `StudySessionsController`, `StudySession`, `StartStudySessionCommand`, `EndStudySessionCommand`. |
+| **Focus Analytics** | Aggregated summary (total focus minutes, today/week focus minutes, total/completed/incomplete sessions, average session duration, task completion rate, habit completion rate, active streaks count); daily breakdown by date range; weekly breakdown (past N weeks). | `AnalyticsController`, `GetFocusAnalyticsSummaryQuery`, `GetDailyAnalyticsQuery`, `GetWeeklyAnalyticsQuery`. |
+| **Gamification** | Durable XP ledger (`XpTransactions`), quadratic level formula (levels 1–50+), 8-item achievement catalog, idempotent unlock evaluation, ChangeTracker pre-commit inspection, Error 1062 collision recovery, read-only REST APIs (`/summary`, `/achievements`, `/history?limit=20`). | `GamificationController`, `GamificationService`, `AchievementService`, `LevelCalculator`, `AchievementCatalog`. |
+| **Virtual Classrooms** | 50 virtual seats per room, deterministic lowest-seat allocation, collision retry on race conditions, 60-second stale participant eviction, heartbeat ping endpoint, leave room endpoint. | `ClassroomsController`, `ClassroomHandlers`, `RoomParticipant`. |
+
+---
+
+### 3. Feature-Completion Matrix
+
+#### Status Classifications:
+- **COMPLETE:** Requirements implemented, verified in source code, covered by automated tests.
+- **PARTIAL:** Implemented in part, but core behaviors, state transitions, or fields are missing.
+- **MISSING:** No meaningful domain, application, or controller implementation exists.
+- **DEFECT:** Implementation exists but has an active correctness, data integrity, or logic flaw.
+- **NOT REQUIRED FOR MVP:** Future product roadmap scope outside initial release.
+
+#### A. Core MVP Modules
+
+| Feature Module | Status | Important Classes / Endpoints | Satisfied Requirements | Missing Behavior / Defects | Test Coverage | MVP Blocker? |
+|---|---|---|---|---|---|---|
+| **Registration & Login** | **COMPLETE** | `AuthController`, `RegisterUserHandler`, `LoginUserHandler`, `PasswordHasher` | PBKDF2 hashing, email uniqueness, duplicate rejection (409), invalid credentials (401), JWT issuance. | None. | 20 unit tests in `AuthenticationTests.cs`. | No |
+| **Authentication & Token Lifecycle** | **PARTIAL** | `JwtProvider`, `Program.cs` | JWT creation with `Sub`, `Email`, `DisplayName`, 7-day expiration, HMAC-SHA256 signature. | No refresh tokens, no token revocation mechanism, token valid for 7 days even after password change or account deletion. | Verified in `AuthenticationTests.cs`. | No (Acceptable for MVP; P1 for hardening) |
+| **User Profile & Account Settings** | **PARTIAL / DEFECT** | `AuthController`, `GetCurrentUserQuery`, `UpdateProfileCommand`, `ChangePasswordCommand`, `DeleteAccountCommand` | Profile query, display name editing, password changing with PBKDF2 check, cascade account deletion. | **DEFECT:** `User.CurrentStreak` is never updated or computed on the User entity; profile screen always displays "0 Days". No profile avatars. | 14 tests in `ProfileManagementTests.cs`, `UserProfileHandlerTests.cs`. | **Yes (P2: Fix `User.CurrentStreak`)** |
+| **Onboarding & Study Preferences** | **MISSING** | `frontend/.../onboarding_screen.dart` | Client-side 3-slide introduction with `has_seen_onboarding` local preference. | Completely missing in backend: no preferences entity, no study goals, no target settings. | 0 backend tests (Flutter UI test only). | No (Can rely on client-side onboarding for MVP) |
+| **Subjects & Subject Management** | **MISSING** | None | None | No `Subject` entity, no subject tagging on study sessions, tasks, or habits. | 0 tests. | No (Deferred in MVP; sessions use string `Title`) |
+| **Study Session Lifecycle** | **PARTIAL** | `StudySessionsController`, `StudySession`, `StartStudySessionCommand`, `EndStudySessionCommand` | Start session, end session, get active session, session history, single active session constraint. | **Missing pause and resume:** Study sessions only transition from active to completed. No pause timestamps or duration subtraction. | 23 tests in `StudySessionHandlerTests.cs`. | No (Continuous timers sufficient for MVP) |
+| **Timer & Duration Correctness** | **COMPLETE** | `EndStudySessionCommandHandler`, `StudySession` | Server calculates duration strictly from `UtcNow - StartTime`, cannot be inflated by client, negative duration prevented (`Math.Max(0, ...)`). | Does not account for paused intervals (since pause is not supported). | Covered in `StudySessionHandlerTests.cs`. | No |
+| **Daily Goals & Targets** | **MISSING** | None | None | No daily target minutes, no goal completion tracking entity or API. | 0 tests. | No (Future roadmap) |
+| **Dashboard Data APIs** | **PARTIAL** | `AnalyticsController`, `StudySessionsController`, `TasksController`, `HabitsController` | Client composes dashboard via `/analytics/summary`, `/studysessions/active`, `/tasks`, and `/habits`. | No single composite `/dashboard` endpoint; requires 4 separate HTTP round-trips from client. | All sub-endpoints tested independently. | No |
+| **Daily & Weekly Statistics** | **COMPLETE** | `AnalyticsController`, `GetDailyAnalyticsQuery`, `GetWeeklyAnalyticsQuery` | Contiguous daily breakdown, zero-filled inactive days, rolling weekly aggregation, input range validation. | None. | 22 tests in `AnalyticsTests.cs`. | No |
+| **Daily Tasks CRUD** | **COMPLETE** | `TasksController`, `DailyTask`, MediatR Task Commands/Queries | Create, list, get by ID, update, delete, toggle completion, 15 XP award, idempotency. | No task due times, tags, or calendar planner scheduling. | 24 tests in `TaskHandlerTests.cs`. | No |
+| **Habit Tracking & Streaks** | **COMPLETE** | `HabitsController`, `Habit`, `HabitCompletion`, `HabitStreakCalculator` | Create, list, get by ID, update, delete, daily toggle, UTC date normalization, dynamic streaks, 20 XP award. | Streak is computed dynamically for habits, but not persisted to `User.CurrentStreak`. | 30 tests in `HabitHandlerTests.cs`. | No |
+| **XP, Levels & Achievements** | **COMPLETE** | `GamificationController`, `GamificationService`, `AchievementService`, `LevelCalculator`, `AchievementCatalog` | Durable ledger, quadratic formula ($L=1..50$), 8 catalog achievements, single unit of work commit, duplicate collision handling. | Concurrency protection across multiple server replicas requires distributed locks. | 98 tests across `Gamification*.cs`, `LevelCalculatorTests.cs`, `Achievement*.cs`. | No |
+
+#### B. Existing Additional Features
+
+| Feature Module | Status | Important Classes / Endpoints | Satisfied Requirements | Missing Behavior / Defects | Test Coverage | MVP Blocker? |
+|---|---|---|---|---|---|---|
+| **Virtual Classrooms** | **PARTIAL** | `ClassroomsController`, `ClassroomHandlers`, `RoomParticipant` | 50 seats per room, deterministic seat allocation, race collision retries, get participants. | **No live media/signaling:** No WebRTC signaling or SFU backend; Flutter uses REST polling every 10s and external links. | 18 tests in `ClassroomHandlerTests.cs`. | No (Sufficient for study lounge MVP) |
+| **Classroom Participant Presence** | **COMPLETE** | `ClassroomHandlers` (`PingRoomCommand`, `GetRoomParticipantsQuery`) | Evicts participants inactive for $> 60$ seconds, explicit leave endpoint, user-isolated seat release. | Heartbeat relies on client active loop; background mobile OS sleep can cause premature eviction. | Tested in `ClassroomHandlerTests.cs`. | No |
+| **Analytics Endpoints** | **COMPLETE** | `AnalyticsController` (`/summary`, `/daily`, `/weekly`) | Focus minutes, session counts, task rates, habit completions, active streaks, input validation. | None. | 22 tests in `AnalyticsTests.cs`. | No |
+| **Gamification APIs** | **COMPLETE** | `GamificationController` (`/summary`, `/achievements`, `/history`) | Level progress fractions, catalog join with user unlocks, newest-first XP history, limit validation (1..100). | None. | 40 tests in `GamificationApiTests.cs`. | No |
+| **Account Deletion Cleanup** | **COMPLETE** | `DeleteAccountCommandHandler` | Password verification, explicit deletion of unconstrained `RoomParticipants`, cascade deletion of Tasks, Habits, Sessions, XP, and Achievements. | Does not revoke already issued JWTs (tokens remain valid until 7-day expiration if not checked against DB). | Tested in `ProfileManagementTests.cs`. | No |
+
+#### C. Future / Roadmap Modules (Outside MVP)
+
+| Module | Status | Description / Assessment |
+|---|---|---|
+| **Exams & Syllabus Management** | **NOT REQUIRED FOR MVP** | No backend models or endpoints. Future phase. |
+| **Study Groups & Membership** | **NOT REQUIRED FOR MVP** | No group entities or permissions. Future phase. |
+| **Friends & Social Invitations** | **NOT REQUIRED FOR MVP** | No social graph or invite codes. Future phase. |
+| **Leaderboards & Challenges** | **NOT REQUIRED FOR MVP** | No global or group leaderboard aggregation queries. Future phase. |
+| **SignalR Real-Time Events** | **NOT REQUIRED FOR MVP** | No SignalR hubs or real-time websocket connections in backend. |
+| **Push Notifications & Device Tokens**| **NOT REQUIRED FOR MVP** | No FCM / APNs integration or device token storage. |
+| **Camera-Study Metadata APIs** | **NOT REQUIRED FOR MVP** | No AI camera presence or posture tracking endpoints. |
+| **AI Assistant Backend Integration** | **NOT REQUIRED FOR MVP** | No LLM integration or study prompt endpoints. |
+| **Notes & Document Scanning** | **NOT REQUIRED FOR MVP** | No OCR or document upload endpoints. |
+| **Subscriptions & In-App Purchases** | **NOT REQUIRED FOR MVP** | No billing, Stripe, or StoreKit integration. Free-tier MVP. |
+| **Offline Synchronization Engine** | **NOT REQUIRED FOR MVP** | Synchronization relies on online REST calls. Offline conflict resolution is deferred. |
+
+---
+
+### 4. API Endpoint Inventory and Contract Analysis
+
+The backend exposes **22 total HTTP endpoints** across 7 controllers:
+
+| Method | Route | Controller & Action | Auth | Tenant Isolation | Validation | Success Response | Error Codes | Tests | Flutter Integration Match? |
+|---|---|---|---|---|---|---|---|---|---|
+| `POST` | `/api/auth/register` | `AuthController.Register` | Anon | N/A | `RegisterRequestValidator` | `200 OK` (`AuthResponse`) | 400, 409, 500 | `AuthenticationTests` | Yes (`auth_repository.dart`) |
+| `POST` | `/api/auth/login` | `AuthController.Login` | Anon | N/A | `LoginRequestValidator` | `200 OK` (`AuthResponse`) | 400, 401, 500 | `AuthenticationTests` | Yes (`auth_repository.dart`) |
+| `GET` | `/api/auth/me` | `AuthController.GetCurrentUser` | Bearer | `ICurrentUserService.UserId` | None | `200 OK` (`UserProfileDto`) | 401, 404, 500 | `UserProfileHandlerTests` | Yes (`profile_repository.dart`) |
+| `POST` | `/api/auth/reset-password` | `AuthController.ResetPassword` | Anon | N/A | Disabled | None | `400 Bad Request` | `ProfileManagementTests` | Yes (Handled as disabled) |
+| `POST` | `/api/auth/change-password` | `AuthController.ChangePassword` | Bearer | `ICurrentUserService.UserId` | `ChangePasswordCommandValidator` | `200 OK` (`{ Message }`) | 400, 401, 404, 500 | `ProfileManagementTests` | Yes (`profile_repository.dart`) |
+| `PUT` | `/api/auth/profile` | `AuthController.UpdateProfile` | Bearer | `ICurrentUserService.UserId` | `UpdateProfileCommandValidator` | `200 OK` (`UserProfileDto`) | 400, 401, 404, 500 | `ProfileManagementTests` | Yes (`profile_repository.dart`) |
+| `PUT` | `/api/auth/me` | `AuthController.UpdateProfile` | Bearer | `ICurrentUserService.UserId` | `UpdateProfileCommandValidator` | `200 OK` (`UserProfileDto`) | 400, 401, 404, 500 | `ProfileManagementTests` | Yes (Alias route) |
+| `DELETE`| `/api/auth/account` | `AuthController.DeleteAccount` | Bearer | `ICurrentUserService.UserId` | `DeleteAccountCommandValidator` | `200 OK` (`{ Message }`) | 400, 401, 404, 500 | `ProfileManagementTests` | Yes (`profile_repository.dart`) |
+| `DELETE`| `/api/auth/me` | `AuthController.DeleteAccount` | Bearer | `ICurrentUserService.UserId` | `DeleteAccountCommandValidator` | `200 OK` (`{ Message }`) | 400, 401, 404, 500 | `ProfileManagementTests` | Yes (Alias route) |
+| `GET` | `/api/tasks` | `TasksController.GetTasks` | Bearer | `ICurrentUserService.UserId` | None | `200 OK` (`List<TaskDto>`) | 401, 500 | `TaskHandlerTests` | Yes (`task_repository.dart`) |
+| `POST` | `/api/tasks` | `TasksController.CreateTask` | Bearer | `ICurrentUserService.UserId` | `CreateTaskCommandValidator` | `201 Created` (`{ id }`) | 400, 401, 500 | `TaskHandlerTests` | Yes (`task_repository.dart`) |
+| `GET` | `/api/tasks/{id}` | `TasksController.GetTaskById` | Bearer | `ICurrentUserService.UserId` | Route GUID | `200 OK` (`TaskDto`) | 401, 404, 500 | `TaskHandlerTests` | Yes (`task_repository.dart`) |
+| `PATCH`| `/api/tasks/{id}/toggle` | `TasksController.ToggleTask` | Bearer | `ICurrentUserService.UserId` | Route GUID | `200 OK` (`{ isCompleted }`) | 401, 404, 500 | `TaskHandlerTests` | Yes (`task_repository.dart`) |
+| `PUT` | `/api/tasks/{id}` | `TasksController.UpdateTask` | Bearer | `ICurrentUserService.UserId` | `UpdateTaskCommandValidator` | `200 OK` (`TaskDto`) | 400, 401, 404, 500 | `TaskHandlerTests` | Yes (`task_repository.dart`) |
+| `DELETE`| `/api/tasks/{id}` | `TasksController.DeleteTask` | Bearer | `ICurrentUserService.UserId` | Route GUID | `204 NoContent` | 401, 404, 500 | `TaskHandlerTests` | Yes (`task_repository.dart`) |
+| `GET` | `/api/habits` | `HabitsController.GetHabits` | Bearer | `ICurrentUserService.UserId` | None | `200 OK` (`List<HabitDto>`) | 401, 500 | `HabitHandlerTests` | Yes (`habit_repository.dart`) |
+| `POST` | `/api/habits` | `HabitsController.CreateHabit` | Bearer | `ICurrentUserService.UserId` | `CreateHabitCommandValidator` | `200 OK` (`{ Id }`) | 400, 401, 500 | `HabitHandlerTests` | Yes (`habit_repository.dart`) |
+| `GET` | `/api/habits/{id}` | `HabitsController.GetHabitById` | Bearer | `ICurrentUserService.UserId` | Route GUID | `200 OK` (`HabitDto`) | 401, 404, 500 | `HabitHandlerTests` | Yes (`habit_repository.dart`) |
+| `POST` | `/api/habits/{id}/toggle` | `HabitsController.ToggleHabit` | Bearer | `ICurrentUserService.UserId` | Route GUID | `200 OK` (`{ IsCompletedToday }`) | 400, 401, 404, 500 | `HabitHandlerTests` | Yes (`habit_repository.dart`) |
+| `PUT` | `/api/habits/{id}` | `HabitsController.UpdateHabit` | Bearer | `ICurrentUserService.UserId` | `UpdateHabitCommandValidator` | `200 OK` (`HabitDto`) | 400, 401, 404, 500 | `HabitHandlerTests` | Yes (`habit_repository.dart`) |
+| `DELETE`| `/api/habits/{id}` | `HabitsController.DeleteHabit` | Bearer | `ICurrentUserService.UserId` | Route GUID | `204 NoContent` | 401, 404, 500 | `HabitHandlerTests` | Yes (`habit_repository.dart`) |
+| `GET` | `/api/studysessions` | `StudySessionsController.GetStudySessions` | Bearer | `ICurrentUserService.UserId` | None | `200 OK` (`List<StudySessionDto>`) | 401, 500 | `StudySessionHandlerTests` | Yes (`study_session_repository.dart`) |
+| `GET` | `/api/studysessions/active` | `StudySessionsController.GetActiveStudySession` | Bearer | `ICurrentUserService.UserId` | None | `200 OK` or `204 NoContent` | 401, 500 | `StudySessionHandlerTests` | Yes (`study_session_repository.dart`) |
+| `POST` | `/api/studysessions/start` | `StudySessionsController.StartSession` | Bearer | `ICurrentUserService.UserId` | `StartStudySessionCommandValidator` | `200 OK` (`StudySessionDto`) | 400, 401, 409, 500 | `StudySessionHandlerTests` | Yes (`study_session_repository.dart`) |
+| `POST` | `/api/studysessions/{id}/end` | `StudySessionsController.EndSession` | Bearer | `ICurrentUserService.UserId` | Route GUID | `200 OK` (`StudySessionDto`) | 400, 401, 404, 500 | `StudySessionHandlerTests` | Yes (`study_session_repository.dart`) |
+| `GET` | `/api/analytics/summary` | `AnalyticsController.GetSummary` | Bearer | `ICurrentUserService.UserId` | None | `200 OK` (`FocusAnalyticsSummaryDto`) | 401, 500 | `AnalyticsTests` | Yes (`analytics_repository.dart`) |
+| `GET` | `/api/analytics/daily` | `AnalyticsController.GetDaily` | Bearer | `ICurrentUserService.UserId` | `GetDailyAnalyticsQueryValidator` | `200 OK` (`DailyAnalyticsDto`) | 400, 401, 500 | `AnalyticsTests` | Yes (`analytics_repository.dart`) |
+| `GET` | `/api/analytics/weekly` | `AnalyticsController.GetWeekly` | Bearer | `ICurrentUserService.UserId` | `GetWeeklyAnalyticsQueryValidator` | `200 OK` (`WeeklyAnalyticsDto`) | 400, 401, 500 | `AnalyticsTests` | Yes (`analytics_repository.dart`) |
+| `GET` | `/api/gamification/summary` | `GamificationController.GetSummary` | Bearer | `ICurrentUserService.UserId` | None | `200 OK` (`GamificationSummaryDto`) | 401, 404, 500 | `GamificationApiTests` | Yes (`gamification_repository.dart`) |
+| `GET` | `/api/gamification/achievements` | `GamificationController.GetAchievements` | Bearer | `ICurrentUserService.UserId` | None | `200 OK` (`List<AchievementDto>`) | 401, 404, 500 | `GamificationApiTests` | Yes (`gamification_repository.dart`) |
+| `GET` | `/api/gamification/history` | `GamificationController.GetHistory` | Bearer | `ICurrentUserService.UserId` | `GetXpHistoryQueryValidator` (limit 1..100) | `200 OK` (`List<XpHistoryDto>`) | 400, 401, 404, 500 | `GamificationApiTests` | Yes (`gamification_repository.dart`) |
+| `GET` | `/api/classrooms/{room}/participants`| `ClassroomsController.GetParticipants` | Bearer | N/A (Room public) | Route string | `200 OK` (`List<RoomParticipantDto>`) | 400, 401, 500 | `ClassroomHandlerTests` | Yes (`classroom_repository.dart`) |
+| `POST` | `/api/classrooms/{room}/join` | `ClassroomsController.Join` | Bearer | `ICurrentUserService.UserId` | `JoinRoomCommandValidator` | `200 OK` (`RoomParticipantDto`) | 400, 401, 409, 500 | `ClassroomHandlerTests` | Yes (`classroom_repository.dart`) |
+| `POST` | `/api/classrooms/{room}/ping` | `ClassroomsController.Ping` | Bearer | `ICurrentUserService.UserId` | None | `200 OK` | 400, 401, 500 | `ClassroomHandlerTests` | Yes (`classroom_repository.dart`) |
+| `POST` | `/api/classrooms/{room}/leave` | `ClassroomsController.Leave` | Bearer | `ICurrentUserService.UserId` | None | `200 OK` | 400, 401, 500 | `ClassroomHandlerTests` | Yes (`classroom_repository.dart`) |
+
+#### Contract Consistency Gaps Identified:
+1. **HTTP Verb Inconsistency on Toggles:** Daily Tasks uses `PATCH /api/tasks/{id}/toggle`, whereas Habits uses `POST /api/habits/{id}/toggle`. Flutter repositories match each route individually, so functionality works, but the REST semantics differ.
+2. **Success Status Code Inconsistency on Creation:** Tasks `POST /api/tasks` returns `201 Created` with `{ id: ... }`, whereas Habits `POST /api/habits` returns `200 OK` with `{ Id: ... }`.
+3. **Property Casing in Responses:** Tasks returns camelCase (`{ id, isCompleted }`), whereas Habits toggle returns PascalCase (`{ IsCompletedToday }`). Both are safely handled in Dart via explicit JSON keys, but contracts are asymmetric.
+
+---
+
+### 5. Application Security Review
+
+| Severity | Vulnerability / Finding | Impact | Evidence in Code | Remediation Requirement |
+|---|---|---|---|---|
+| **CRITICAL** | **Plaintext Credentials & Secrets in Source Control** | Database credentials (`DefaultConnection`) and JWT secret (`Jwt:Secret`) are committed directly to `appsettings.json`. If the repository is exposed, the database and token signature are compromised. | `backend/MOT.Api/appsettings.json` lines 10 & 13. | Remove credentials from `appsettings.json`. Inject via environment variables (`DB_CONNECTION_STRING`, `JWT_SECRET`). |
+| **HIGH** | **Missing Rate Limiting on Authentication Endpoints** | `POST /api/auth/login` and `POST /api/auth/register` have no rate limiting. Attackers can execute automated brute-force password guessing and credential stuffing attacks. | `Program.cs` contains no `AddRateLimiter` or rate-limiting middleware. | Implement ASP.NET Core 8 RateLimiter (`SlidingWindowLimiter` or `FixedWindowLimiter`) on auth endpoints. |
+| **HIGH** | **Stateless JWT with No Revocation on Password Change or Account Deletion** | Tokens have a fixed 7-day expiration. If a user changes their password or deletes their account, an existing token remains cryptographically valid until expiration. | `JwtProvider.cs` lines 45–48 (`expires: DateTime.UtcNow.AddDays(7)`). No token blacklist or user security stamp verification. | Implement token versioning (`SecurityStamp` on `User`) or token revocation store. (Mitigated in part because DB queries fail on deleted users). |
+| **HIGH** | **Unconditional Startup DDL Migration Execution** | `dbContext.Database.Migrate()` runs automatically during `Program.cs` startup. A crash during migration halts web container boot in a restart loop. | `Program.cs` lines 116–120. | Gate `Database.Migrate()` behind `APPLY_MIGRATIONS_ON_STARTUP=true` or separate into a pre-deployment migration job. |
+| **MEDIUM** | **Overly Permissive CORS Configuration** | `AllowAll` CORS policy combined with manual wildcard headers (`Access-Control-Allow-Origin: *`) allows any web client to issue cross-origin requests. | `Program.cs` lines 57–63 and custom middleware lines 126–140. | Restrict origins in production to configured frontend domain URLs. |
+| **MEDIUM** | **In-Process Concurrency Serialization Limits Horizontal Scaling** | `UserConcurrencyLock` uses in-process `ConcurrentDictionary<Guid, SemaphoreSlim>`. Across multiple server instances, concurrent awards for different activities can cause lost updates on `User.XP`. | `UserConcurrencyLock.cs` lines 10–17. | Enforce `replicas: 1` in deployment. For multi-replica scaling, implement distributed locks (`GET_LOCK`) or atomic SQL increments. |
+| **LOW** | **Missing Forwarded Headers Middleware** | `app.UseHttpsRedirection()` is active without `UseForwardedHeaders()`. When deployed behind reverse proxies (Render, AWS ALB, Cloudflare), requests can fail or trigger redirect loops. | `Program.cs` line 122. | Add `app.UseForwardedHeaders()` with `X-Forwarded-Proto`. |
+| **LOW** | **Disabled Password Recovery** | `POST /api/auth/reset-password` unconditionally returns 400. While secure against user enumeration, legitimate users cannot reset forgotten passwords without administrator intervention. | `AuthController.cs` lines 98–108. | Implement secure email-based tokenized password recovery in future phase. |
+
+---
+
+### 6. Study-Session Correctness Audit
+
+- **Resource Ownership Enforcement:** Handlers strictly query `s.UserId == userId`. Accessing another user's session throws `StudySessionNotFoundException` (HTTP 404 Not Found), preventing enumeration.
+- **State Transition Integrity:** Only two states exist: Active (`!IsCompleted && EndTime == null`) and Completed (`IsCompleted && EndTime != null`). Invalid transitions (e.g. attempting to start when an active session already exists) are rejected with `ActiveStudySessionAlreadyExistsException` (HTTP 409 Conflict).
+- **Idempotency on Repeated End Calls:** `EndStudySessionCommandHandler` checks `if (!session.IsCompleted)`. Calling end on an already completed session safely returns the existing completed DTO without altering timestamps or duplicating XP awards.
+- **Duration Non-Inflation & Server Authority:** Duration is strictly calculated server-side:
+  `session.DurationMinutes = Math.Max(0, (int)(session.EndTime.Value - session.StartTime).TotalMinutes);`
+  Client requests cannot supply, override, or inflate duration. Negative durations are clamped to 0.
+- **Database-Level Active Session Uniqueness:** Migration `20261012110919_FixStudySessionActiveUserIdColumn` enforces a filtered unique index `IX_StudySessions_ActiveUserId` on `(ActiveUserId)`. If an active session exists, `ActiveUserId` equals `UserId`; when completed, `ActiveUserId` is set to `NULL`. MariaDB allows multiple `NULL` values while enforcing uniqueness for non-null active user IDs.
+- **UTC Date Boundaries & Parity:** All timestamps (`StartTime`, `EndTime`) use `DateTime.UtcNow`. Analytics queries consistently filter by `s.StartTime >= todayUtc && s.StartTime < tomorrowUtc`.
+- **Incomplete Sessions Handling:** Incomplete sessions (`!s.IsCompleted || s.EndTime == null`) earn 0 XP (`XpAwardResult.NotEligible`) and are cleanly excluded from `CompletedSessionsCount` in Focus Analytics.
+- **Client Recovery after App Restart / Network Drop:** Flutter `TimerScreen` invokes `GET /api/studysessions/active` on initialization. If an active session is returned, the client timer calculates elapsed time from server `startTime` (`DateTime.now().difference(serverStartTime)`) and resumes countdown seamlessly without state loss.
+
+---
+
+### 7. Database and Migration Readiness
+
+#### Migration Inventory and Classification
+
+| Order | Migration File | Status | Schema Alterations | Breaking / Rollback Risks |
+|---|---|---|---|---|
+| **1** | `20260909161703_AddHabits.cs` | **Applied** | Creates `Habits`, `HabitCompletions` | None (historical baseline). |
+| **2** | `20261002081502_AddStudySessions.cs` | **Applied** | Creates `StudySessions` with FK to `Users` | None (historical baseline). |
+| **3** | `20261006061237_AddRoomParticipants.cs` | **Applied** | Creates `RoomParticipants` | None (historical baseline). |
+| **4** | `20261006064106_AddSingleActiveStudySessionConstraint.cs` | **Applied** | Initial constraint attempt on `ActiveUserId` | Superseded by Migration 5. |
+| **5** | `20261012110919_FixStudySessionActiveUserIdColumn.cs` | **PENDING** | Alters `ActiveUserId` to `char(36)`, backfills active sessions, creates unique index `IX_StudySessions_ActiveUserId`. | **HIGH:** Fails if any user has $\ge 2$ uncompleted sessions (`IsCompleted = 0 AND EndTime IS NULL`). |
+| **6** | `20261012121819_AddRoomParticipantConstraints.cs` | **PENDING** | Alters `RoomName`, `Username` to `varchar(100)`, creates composite unique indexes on `(RoomName, SeatNumber)` and `(RoomName, UserId)`. | **LOW/MED:** Fails if room/user names $> 100$ characters or duplicate seats exist. |
+| **7** | `20261012175608_AddUniqueIndexToHabitCompletions.cs` | **PENDING** | Creates unique index `IX_HabitCompletions_HabitId_Date`, drops redundant index `IX_HabitCompletions_HabitId`. | **HIGH:** Fails if duplicate habit completions exist for the same habit on the same date. |
+| **8** | `20261013113448_AddXpTransactionsLedger.cs` | **PENDING** | Creates table `XpTransactions`, FK to `Users` (Cascade), unique index on `(UserId, SourceType, SourceId)`. | **CRITICAL ROLLBACK RISK:** `Down()` drops table, permanently destroying user XP history. |
+| **9** | `20261013145328_AddUserAchievementsTable.cs` | **PENDING** | Creates table `UserAchievements`, FK to `Users` (Cascade), unique index on `(UserId, AchievementCode)`. | **CRITICAL ROLLBACK RISK:** `Down()` drops table, permanently destroying unlocked achievements. |
+
+- **Model Snapshot Parity:** `dotnet ef migrations has-pending-model-changes` verified **0 pending model changes**.
+- **Rollback Hazard:** Migrations 8 and 9 cannot be rolled back after go-live without complete loss of gamification history. In MySQL/MariaDB, DDL statements cause an implicit transaction commit. Schema restoration must be performed via full logical backups (`mysqldump`).
+
+---
+
+### 8. Gamification and Analytics Integrity
+
+- **XP Calculation Rules:**
+  - Daily Task completion: 15 XP (`GamificationOptions.TaskCompletionXp`).
+  - Habit completion: 20 XP (`GamificationOptions.HabitCompletionXp`).
+  - Study Session: 0 XP if duration $< 5$ minutes; otherwise $10 + \lfloor\text{duration}/5\rfloor$ XP, capped at 60 XP.
+  - Achievements: Catalog rewards of 25, 50, 75, or 100 XP.
+- **Idempotency & Duplicate Award Guards:**
+  - Tasks: Checks `XpTransactions.AnyAsync(UserId, "TASK", taskId)`. Untoggling and re-checking awards 0 duplicate XP.
+  - Habits: Checks `XpTransactions.AnyAsync(UserId, "HABIT", $"{habitId}:{yyyy-MM-dd}")`. Re-toggling on the same date awards 0 duplicate XP.
+  - Study Sessions: Completed sessions check `session.IsCompleted == true` and skip awards.
+  - Achievements: Unique constraint `IX_UserAchievements_UserId_AchievementCode` prevents double unlocks.
+- **Balance Overflow Protection:** Handlers check `(long)user.XP + amount > int.MaxValue` before incrementing, throwing `OverflowException` rather than rolling over.
+- **Atomicity via Single Unit of Work:** The activity status update, XP ledger row, user XP increment, user level update, and achievement rows are staged in the same ChangeTracker and committed atomically via a single `_context.SaveChangesAsync()` call.
+- **Concurrency & MariaDB Error 1062 Recovery:** Handlers catch `DbUpdateException` with Error 1062, detach unpersisted entities, reload `User`, and return safely without duplicating XP.
+- **Identified Defect — `User.CurrentStreak` Unpopulated:**
+  - `User.cs` defines `public int CurrentStreak { get; set; } = 0;`.
+  - While `HabitStreakCalculator` dynamically computes streaks per habit in `GetHabitsQuery` and `Analytics`, **`User.CurrentStreak` is never updated anywhere in the backend.**
+  - `GET /api/auth/me` returns `user.CurrentStreak`, causing the Flutter Profile screen to permanently display "0 Days".
+
+---
+
+### 9. Test Suite Quality and Verification
+
+#### Test Execution Summary:
+```
+Test run for MOT.Tests.dll (.NETCoreApp,Version=v8.0)
+Passed! - Failed: 0, Passed: 462, Skipped: 0, Total: 462, Duration: 5 s
+```
+
+#### Test Architecture and Coverage Analysis:
+
+| Test Class | Tests | Type | Coverage Scope |
+|---|---|---|---|
+| `AuthenticationTests.cs` | 20 | Mocked Unit | Registration, login, password hashing, invalid credentials, duplicate email. |
+| `ProfileManagementTests.cs` | 14 | Mocked Unit | Change password, update profile, account deletion, password verification. |
+| `UserProfileHandlerTests.cs`| 6 | Mocked Unit | User profile query, total focus minutes calculation. |
+| `TaskHandlerTests.cs` | 24 | Mocked Unit | Tasks CRUD, completion toggling, user isolation, XP award integration. |
+| `HabitHandlerTests.cs` | 30 | Mocked Unit | Habits CRUD, daily toggling, streak calculation, XP award integration. |
+| `StudySessionHandlerTests.cs`| 23 | Mocked Unit | Start/end sessions, active session query, duration calculation, XP integration. |
+| `AnalyticsTests.cs` | 22 | Mocked Unit | Focus summary, daily contiguous breakdown, weekly intervals, input validation. |
+| `ClassroomHandlerTests.cs` | 18 | Mocked Unit | Join room, seat assignment (0..49), stale participant eviction, ping, leave. |
+| `AchievementCatalogTests.cs`| 6 | Domain Unit | Catalog count (8), definitions, XP reward sum (400 XP). |
+| `AchievementServiceTests.cs`| 24 | Mocked Unit | Achievement evaluation across sessions, tasks, habits, idempotency, Error 1062. |
+| `GamificationServiceTests.cs`| 23 | Mocked Unit | XP formulas, award rules, eligibility, ledger insertion, level calculation. |
+| `GamificationApiTests.cs` | 40 | Mocked Unit | API summaries, achievement lists, history queries, limit validation, scoping. |
+| `LevelCalculatorTests.cs` | 207 | Domain Unit | Quadratic formulas, thresholds, levels 1–50, boundary conditions. |
+| `XpLedgerTests.cs` | 6 | Mocked Unit | Ledger idempotency, duplicate prevention, overflow guard. |
+
+#### Testing Gaps and Blindspots:
+1. **Zero Real Database Integration Tests:** All 462 tests run against in-memory mocks (`MockDbSetHelper`) or SQLite/in-memory structures. There are **no tests executed against a real MariaDB 10.11 instance**. Real MariaDB Error 1062 regex, collations, and foreign key cascade behaviors are unverified in automated CI.
+2. **Zero End-to-End HTTP Tests (`WebApplicationFactory`):** Tests invoke command handlers and controllers directly via C# method calls. ASP.NET Core middleware (CORS, JWT bearer authentication, routing, JSON serialization) is not tested end-to-end.
+3. **Multi-Instance Concurrency Tests:** Tests verify concurrency only within a single process via mocked `SemaphoreSlim`. True distributed race conditions across multiple processes are unverified.
+
+---
+
+### 10. Deployment and Operational Readiness
+
+| Operational Area | Current Status | Assessment & Risk |
+|---|---|---|
+| **Startup Behavior** | **UNGUARDED** | Runs `Database.Migrate()` unconditionally. Crash on migration failure terminates container in restart loop. |
+| **Connection String Fallback** | **HAZARDOUS** | Falls back to production host in `appsettings.json` if `DB_CONNECTION_STRING` is unset. |
+| **Health Checks** | **MISSING** | No `/health` or `/healthz` endpoints. Orchestrators cannot monitor readiness. |
+| **Logging** | **OPERATIONAL** | Serilog configured with Console sink and configuration enrichment. Safe exception masking prevents client leaks. |
+| **Container Runtime** | **OPERATIONAL** | Multi-stage Dockerfile (`mcr.microsoft.com/dotnet/aspnet:8.0`) listening on configurable `PORT` (default 5000). |
+| **CI/CD Automation** | **PARTIAL** | GitHub Actions (`backend.yml`) builds and tests on push/PR to `main`. Does not validate database migrations or deploy. |
+| **Instance Scaling Policy**| **STRICT SINGLE-INSTANCE** | Architecture requires `replicas: 1`. Multi-replica auto-scaling is prohibited due to in-memory `UserConcurrencyLock`. |
+| **Database Provider Compatibility** | **RESOLVED** | Configured for `ServerVersion.Parse("10.11.18-mariadb")` via Pomelo provider. |
+
+---
+
+### 11. Prioritized Action Plan
+
+#### P0 — Must Fix Before Any Staging / Production Deployment
+1. **Decouple Migrations from Startup (`Program.cs`):** Gate `Database.Migrate()` behind `APPLY_MIGRATIONS_ON_STARTUP=true` (defaulting to `false`) so containers boot safely without executing DDL.
+2. **Prevent Cross-Environment Targeting (`Program.cs`):** Require `DB_CONNECTION_STRING` from the environment in non-development environments; throw a fatal startup exception if missing rather than falling back to `appsettings.json`.
+3. **Purge Secrets from Source Control (`appsettings.json`):** Replace database credentials and JWT secret in `appsettings.json` with empty placeholder tokens; inject via secure environment variables in deployment environments.
+4. **Implement Health Check Endpoints (`Program.cs`):** Add `builder.Services.AddHealthChecks()` and `app.MapHealthChecks("/health")` to support load balancer probes.
+5. **Execute Read-Only Preflight SQL on Staging:** Run Preflight Queries 1–6 against the target MariaDB database to confirm 0 data collisions before applying pending migrations.
+6. **Enforce Single Container Replica:** Configure hosting environment (Render, ECS, or Kubernetes) to strictly run `replicas: 1`.
+
+#### P1 — Must Fix Before Production Release
+1. **Add Rate Limiting on Auth Routes:** Configure ASP.NET Core `RateLimiter` on `/api/auth/login` and `/api/auth/register` (e.g. 10 requests per minute per IP).
+2. **Tighten CORS Policies:** Replace `AllowAll` wildcard with explicit allowed origins configured via environment variables.
+3. **Add Forwarded Headers Middleware:** Enable `app.UseForwardedHeaders()` with `ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto`.
+4. **Add Real MariaDB Integration Tests in CI:** Implement a test suite using Testcontainers MariaDB to verify real foreign keys, unique constraints, and Error 1062 collision recovery.
+
+#### P2 — Required to Complete Core MVP
+1. **Fix `User.CurrentStreak` Defect:** When habits are completed, calculate the user's active streak across habits using `HabitStreakCalculator` and persist it to `User.CurrentStreak`, or calculate it dynamically in `GetCurrentUserQueryHandler`.
+2. **Standardize API Route Conventions:** Align `PATCH /api/tasks/{id}/toggle` and `POST /api/habits/{id}/toggle` to consistent HTTP verbs and response casing.
+
+#### P3 — Future Roadmap Features (Post-MVP)
+1. **Subjects & Subject Tagging:** Add `Subject` entity and associate with tasks and study sessions.
+2. **Study Session Pause / Resume:** Completed in Phase 9 (see section below).
+3. **Token Revocation & Refresh Tokens:** Implement refresh token rotation and security stamp invalidation.
+4. **Distributed Concurrency:** Replace in-process `UserConcurrencyLock` with distributed locks or optimistic row versions for horizontal scaling.
+5. **Classroom WebRTC / SFU:** Replace REST polling with SignalR real-time hubs or LiveKit media servers.
+
+---
+
+### 12. Verification & Closure Checklist
+
+| Item | Status | Evidence Needed to Close |
+|---|---|---|
+| **Architecture & Dependency Boundaries** | **CLOSED** | Clean Architecture validated; no circular dependencies; build succeeds with 0 errors. |
+| **Authentication & Password Security** | **CLOSED** | PBKDF2 hashing verified; uniform 401/409 responses proven in `AuthenticationTests.cs`. |
+| **Tenant Isolation & Ownership** | **CLOSED** | All endpoints enforce `ICurrentUserService.UserId`; cross-tenant access returns 404. |
+| **Tasks & Habits CRUD & XP Integration** | **CLOSED** | Handlers verified in `TaskHandlerTests.cs` and `HabitHandlerTests.cs`; XP awards proven. |
+| **Study Sessions Timer Correctness** | **CLOSED** | Server-calculated duration verified; client inflation prevented; unique active session index proven. |
+| **Gamification Ledger & Achievements** | **CLOSED** | 8 catalog items, level formulas, and collision handling proven in 98 gamification tests. |
+| **EF Core Model Synchronization** | **CLOSED** | `dotnet ef migrations has-pending-model-changes` returns 0 pending model changes. |
+| **User Streak Display Defect** | **OPEN (P2)** | Requires computing and populating `User.CurrentStreak` in `GetCurrentUserQueryHandler`. |
+| **Startup Migration Decoupling** | **OPEN (P0)** | Requires editing `Program.cs` to gate `Database.Migrate()` and verify local build. |
+| **Secrets Purging from `appsettings.json`**| **OPEN (P0)** | Requires replacing sensitive values with placeholders and injecting via environment. |
+| **Health Check Implementation** | **OPEN (P0)** | Requires adding `AddHealthChecks()` and `MapHealthChecks("/health")` in `Program.cs`. |
+| **Remote Database Preflight Execution** | **OPEN (P0)** | Requires human operator to execute Preflight Queries 1–6 against staging MariaDB. |
+| **Pending Migrations Application** | **OPEN (P0)** | Requires operator to execute `dotnet ef database update` on staging after preflight review. |
+
+---
+
+### 13. Concise Final Answer
+
+> **"Is the backend ready, and what exactly must happen next?"**
+>
+> **The backend is NOT YET READY for production, but it IS ARCHITECTURALLY READY FOR CONTROLLED STAGING DEPLOYMENT, subject to completing 4 immediate code guardrails:**
+>
+> 1. **Immediate Code Actions (P0):**
+>    - In `Program.cs`: Gate `Database.Migrate()` behind `APPLY_MIGRATIONS_ON_STARTUP=true`, forbid fallback to production credentials in non-development environments, and add the `/health` endpoint.
+>    - In `appsettings.json`: Purge credentials and JWT secret, replacing them with empty configuration placeholders.
+>    - In `GetCurrentUserQueryHandler.cs`: Populate `User.CurrentStreak` dynamically from `HabitStreakCalculator` so the Flutter Profile screen displays accurate streaks.
+> 2. **Immediate Operational Actions (P0):**
+>    - Operator executes the 6 Read-Only SQL Preflight Queries against the staging database to verify zero data anomalies.
+>    - Operator applies the 5 pending migrations to the staging MariaDB database.
+>    - Deploy a single container instance (`replicas: 1`) to staging with `APPLY_MIGRATIONS_ON_STARTUP=false`.
+>    - Run end-to-end smoke verification using the Flutter application against the staging API.
+
+---
+
+## Phase 9 — Complete Study Session Lifecycle
+
+**Status: COMPLETED / VERIFIED**
+
+Phase 9 completes the study session lifecycle in Mind On Track (MOT) by implementing pause, resume, precise active duration accounting (excluding paused intervals from focus time and XP awards), robust session-state validation, and full Flutter client integration.
+
+### 1. Domain & Persistence Architecture
+- **Entity Enhancements (`StudySession.cs`):**
+  - `IsPaused` (bool, default `false`): Tracks whether the active session is currently paused.
+  - `LastPausedAt` (DateTime?, null): UTC timestamp when the session was most recently paused.
+  - `LastResumedAt` (DateTime?, null): UTC timestamp when the session was started or last resumed.
+  - `AccumulatedSeconds` (int, default `0`): Server-authoritative running tally of focused seconds accrued across completed focus intervals.
+- **Model Configuration (`AppDbContext.cs`):**
+  - Configured `IsPaused` default `false` and `AccumulatedSeconds` default `0` in `OnModelCreating`.
+  - Preserved filtered unique index `IX_StudySessions_ActiveUserId` on `(ActiveUserId)` where `ActiveUserId IS NOT NULL`.
+  - Scaffolded EF Core migration `20261014095555_AddStudySessionPauseAndResume`.
+  - `dotnet ef migrations has-pending-model-changes` verified: **0 pending model changes**.
+  - **Zero remote database connections, queries, or migration executions.**
+
+### 2. Precise Duration Accounting
+- **Active Focus Duration Formula:**
+  - While running (`!IsPaused`): `ElapsedSeconds = AccumulatedSeconds + (int)(DateTime.UtcNow - LastResumedAt).TotalSeconds`.
+  - While paused (`IsPaused`): `ElapsedSeconds = AccumulatedSeconds`.
+  - Paused periods are strictly excluded from `AccumulatedSeconds`.
+  - On `EndStudySessionCommand`:
+    - If running, remaining active interval is accumulated into `AccumulatedSeconds`.
+    - If paused, `AccumulatedSeconds` is used directly without adding paused time.
+    - Final `DurationMinutes = AccumulatedSeconds / 60`.
+- **Gamification & Analytics Parity:**
+  - Gamification XP awards and achievement evaluation evaluate against the accurate `DurationMinutes` (excluding paused time).
+  - All existing focus analytics queries sum `DurationMinutes`, preserving zero-defect consistency across daily/weekly reports without requiring query modifications.
+
+### 3. Application CQRS & API Endpoints
+- **Pause Command (`PauseStudySessionCommand.cs`, `PauseStudySessionCommandValidator.cs`):**
+  - Validates user ownership and non-empty GUID.
+  - Acquires per-user concurrency lock (`UserConcurrencyLock`).
+  - Throws `InvalidStudySessionStateException` if session is completed (`400 Bad Request`).
+  - Idempotent if already paused.
+  - Accumulates active seconds since `LastResumedAt` into `AccumulatedSeconds`, sets `IsPaused = true`, `LastPausedAt = UtcNow`, `LastResumedAt = null`.
+- **Resume Command (`ResumeStudySessionCommand.cs`, `ResumeStudySessionCommandValidator.cs`):**
+  - Validates user ownership and non-empty GUID.
+  - Acquires per-user concurrency lock (`UserConcurrencyLock`).
+  - Throws `InvalidStudySessionStateException` if session is completed (`400 Bad Request`).
+  - Idempotent if already running.
+  - Sets `IsPaused = false`, `LastResumedAt = UtcNow`, `LastPausedAt = null`.
+- **DTO Extensions (`StudySessionExtensions.cs`):**
+  - Maps `IsPaused`, `LastPausedAt`, `AccumulatedSeconds`, and dynamically computes server-authoritative `ElapsedSeconds` for running and paused sessions.
+- **API Controller (`StudySessionsController.cs`):**
+  - Exposed `POST /api/studysessions/{id}/pause`
+  - Exposed `POST /api/studysessions/{id}/resume`
+  - Handled `InvalidStudySessionStateException` mapped to HTTP 400 Bad Request.
+
+### 4. Flutter Integration
+- **Model (`study_session_model.dart`):**
+  - Added `isPaused`, `lastPausedAt`, `accumulatedSeconds`, `elapsedSeconds`, and `toJson()`.
+  - Implemented safe fallbacks for legacy payloads.
+- **Repository (`study_session_repository.dart`):**
+  - Added `Future<StudySession> pauseSession(String sessionId)` calling `POST studysessions/{id}/pause`.
+  - Added `Future<StudySession> resumeSession(String sessionId)` calling `POST studysessions/{id}/resume`.
+- **UI (`timer_screen.dart`):**
+  - Integrated server-authoritative pause/resume actions with reactive button icons (`Icons.pause_circle_filled` / `Icons.play_circle_filled`).
+  - Added "FOCUSING" vs "PAUSED" visual status pill and border color transition.
+  - Added action loading guards (`_isActionLoading`) to prevent race conditions from repeated button clicks.
+  - Added `WidgetsBindingObserver` to re-synchronize elapsed timer state upon `AppLifecycleState.resumed` (app minimized/restored).
+  - Wrapped timer layout in `SingleChildScrollView` to prevent viewport overflow across diverse screen sizes.
+
+### 5. Verification & Test Suite
+- **Backend Tests:**
+  - `MOT.Tests/StudySessions/StudySessionHandlerTests.cs`: 19 comprehensive unit and integration tests covering pause, resume, multi-cycle accumulation, ending while paused, completed session rejection, and HTTP controller responses.
+  - Total backend test suite: **481/481 tests passing (100%)**.
+- **Frontend Tests:**
+  - `frontend/test/study_session_model_test.dart`: Model deserialization, fallback handling, and serialization tests.
+  - `frontend/test/study_session_repository_and_timer_screen_test.dart`: Repository pause/resume endpoint tests and TimerScreen widget interaction tests.
+  - Total Flutter test suite: **62/62 tests passing (100%)**.
+  - `flutter analyze --no-fatal-infos`: **0 errors, 0 warnings**.
+- **Migration & Database Safety:**
+  - EF Core migration generated: `20261014095555_AddStudySessionPauseAndResume`.
+  - Model snapshot verified: 0 pending model changes.
+  - Live/remote database untouched; 0 migrations applied.
+
+---

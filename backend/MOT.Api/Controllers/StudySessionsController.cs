@@ -97,6 +97,62 @@ namespace MOT.Api.Controllers
                    message.Contains("1062");
         }
 
+        [HttpPost("{id}/pause")]
+        public async Task<IActionResult> PauseSession(Guid id)
+        {
+            try
+            {
+                var session = await _mediator.Send(new PauseStudySessionCommand { SessionId = id });
+                return Ok(session);
+            }
+            catch (StudySessionNotFoundException ex)
+            {
+                return NotFound(new { Error = ex.Message });
+            }
+            catch (InvalidStudySessionStateException ex)
+            {
+                return BadRequest(new { Error = ex.Message });
+            }
+            catch (FluentValidation.ValidationException ex)
+            {
+                var errors = ex.Errors.Select(e => e.ErrorMessage).ToList();
+                return BadRequest(new { Error = errors.FirstOrDefault() ?? "Validation failed.", Errors = errors });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An unexpected error occurred while pausing study session {SessionId}.", id);
+                return StatusCode(500, new { Error = "An unexpected error occurred while pausing study session." });
+            }
+        }
+
+        [HttpPost("{id}/resume")]
+        public async Task<IActionResult> ResumeSession(Guid id)
+        {
+            try
+            {
+                var session = await _mediator.Send(new ResumeStudySessionCommand { SessionId = id });
+                return Ok(session);
+            }
+            catch (StudySessionNotFoundException ex)
+            {
+                return NotFound(new { Error = ex.Message });
+            }
+            catch (InvalidStudySessionStateException ex)
+            {
+                return BadRequest(new { Error = ex.Message });
+            }
+            catch (FluentValidation.ValidationException ex)
+            {
+                var errors = ex.Errors.Select(e => e.ErrorMessage).ToList();
+                return BadRequest(new { Error = errors.FirstOrDefault() ?? "Validation failed.", Errors = errors });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An unexpected error occurred while resuming study session {SessionId}.", id);
+                return StatusCode(500, new { Error = "An unexpected error occurred while resuming study session." });
+            }
+        }
+
         [HttpPost("{id}/end")]
         public async Task<IActionResult> EndSession(Guid id)
         {
@@ -108,6 +164,10 @@ namespace MOT.Api.Controllers
             catch (StudySessionNotFoundException ex)
             {
                 return NotFound(new { Error = ex.Message });
+            }
+            catch (InvalidStudySessionStateException ex)
+            {
+                return BadRequest(new { Error = ex.Message });
             }
             catch (FluentValidation.ValidationException ex)
             {

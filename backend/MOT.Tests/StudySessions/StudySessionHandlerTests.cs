@@ -772,6 +772,519 @@ public class StudySessionHandlerTests
         var statusResult = result.Should().BeOfType<ObjectResult>().Subject;
         statusResult.StatusCode.Should().Be(500);
     }
+
+    [Fact]
+    public async Task PauseStudySession_WhenRunning_PausesSessionAndAccumulatesActiveSeconds()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var startTime = DateTime.UtcNow.AddMinutes(-20);
+        var session = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            ActiveUserId = userId,
+            Title = "Running Focus",
+            StartTime = startTime,
+            LastResumedAt = startTime,
+            AccumulatedSeconds = 0,
+            IsPaused = false,
+            IsCompleted = false
+        };
+        _sessions.Add(session);
+
+        var handler = new PauseStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        // Act
+        var result = await handler.Handle(new PauseStudySessionCommand { SessionId = session.Id }, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.IsPaused.Should().BeTrue();
+        result.AccumulatedSeconds.Should().BeGreaterThanOrEqualTo(1190); // ~1200s (20 mins)
+        result.DurationMinutes.Should().BeGreaterThanOrEqualTo(19);
+        session.IsPaused.Should().BeTrue();
+        session.LastPausedAt.Should().NotBeNull();
+        session.LastResumedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PauseStudySession_WhenAlreadyPaused_IsIdempotentAndDoesNotDuplicateDuration()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var pausedAt = DateTime.UtcNow.AddMinutes(-5);
+        var session = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            ActiveUserId = userId,
+            Title = "Paused Focus",
+            StartTime = DateTime.UtcNow.AddMinutes(-30),
+            AccumulatedSeconds = 1500, // 25 mins
+            IsPaused = true,
+            LastPausedAt = pausedAt,
+            DurationMinutes = 25,
+            IsCompleted = false
+        };
+        _sessions.Add(session);
+
+        var handler = new PauseStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        // Act
+        var result = await handler.Handle(new PauseStudySessionCommand { SessionId = session.Id }, CancellationToken.None);
+
+        // Assert
+        result.IsPaused.Should().BeTrue();
+        result.AccumulatedSeconds.Should().Be(1500); // Unaltered
+        result.DurationMinutes.Should().Be(25);
+        session.LastPausedAt.Should().Be(pausedAt);
+    }
+
+    [Fact]
+    public async Task PauseStudySession_WhenCompleted_ThrowsInvalidStudySessionStateException()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var session = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Completed Session",
+            StartTime = DateTime.UtcNow.AddMinutes(-60),
+            EndTime = DateTime.UtcNow,
+            DurationMinutes = 60,
+            IsCompleted = true
+        };
+        _sessions.Add(session);
+
+        var handler = new PauseStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        // Act & Assert
+        var act = async () => await handler.Handle(new PauseStudySessionCommand { SessionId = session.Id }, CancellationToken.None);
+        await act.Should().ThrowAsync<InvalidStudySessionStateException>()
+            .WithMessage("*already ended*");
+    }
+
+    [Fact]
+    public async Task PauseStudySession_WhenSessionBelongsToAnotherUser_ThrowsStudySessionNotFoundException()
+    {
+        // Arrange
+        var ownerId = Guid.NewGuid();
+        var attackerId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(attackerId.ToString());
+
+        var session = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = ownerId,
+            Title = "Owner Session",
+            StartTime = DateTime.UtcNow.AddMinutes(-15),
+            IsCompleted = false
+        };
+        _sessions.Add(session);
+
+        var handler = new PauseStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        // Act & Assert
+        var act = async () => await handler.Handle(new PauseStudySessionCommand { SessionId = session.Id }, CancellationToken.None);
+        await act.Should().ThrowAsync<StudySessionNotFoundException>();
+    }
+
+    [Fact]
+    public async Task ResumeStudySession_WhenPaused_ResumesSessionAndSetsRunning()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var session = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            ActiveUserId = userId,
+            Title = "Paused Focus",
+            StartTime = DateTime.UtcNow.AddMinutes(-30),
+            AccumulatedSeconds = 900, // 15 mins
+            IsPaused = true,
+            LastPausedAt = DateTime.UtcNow.AddMinutes(-15),
+            IsCompleted = false
+        };
+        _sessions.Add(session);
+
+        var handler = new ResumeStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        // Act
+        var result = await handler.Handle(new ResumeStudySessionCommand { SessionId = session.Id }, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.IsPaused.Should().BeFalse();
+        result.AccumulatedSeconds.Should().Be(900);
+        session.IsPaused.Should().BeFalse();
+        session.LastResumedAt.Should().NotBeNull();
+        session.LastPausedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResumeStudySession_WhenAlreadyRunning_IsIdempotentAndDoesNotResetLastResumedAt()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var resumedAt = DateTime.UtcNow.AddMinutes(-10);
+        var session = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            ActiveUserId = userId,
+            Title = "Already Running",
+            StartTime = DateTime.UtcNow.AddMinutes(-20),
+            LastResumedAt = resumedAt,
+            AccumulatedSeconds = 600,
+            IsPaused = false,
+            IsCompleted = false
+        };
+        _sessions.Add(session);
+
+        var handler = new ResumeStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        // Act
+        var result = await handler.Handle(new ResumeStudySessionCommand { SessionId = session.Id }, CancellationToken.None);
+
+        // Assert
+        result.IsPaused.Should().BeFalse();
+        session.LastResumedAt.Should().Be(resumedAt); // Not reset to UtcNow
+    }
+
+    [Fact]
+    public async Task ResumeStudySession_WhenCompleted_ThrowsInvalidStudySessionStateException()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var session = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Finished",
+            StartTime = DateTime.UtcNow.AddMinutes(-60),
+            EndTime = DateTime.UtcNow,
+            IsCompleted = true
+        };
+        _sessions.Add(session);
+
+        var handler = new ResumeStudySessionCommandHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        // Act & Assert
+        var act = async () => await handler.Handle(new ResumeStudySessionCommand { SessionId = session.Id }, CancellationToken.None);
+        await act.Should().ThrowAsync<InvalidStudySessionStateException>()
+            .WithMessage("*already ended*");
+    }
+
+    [Fact]
+    public async Task EndStudySession_WhenPaused_EndsSessionSafelyAndExcludesPausedTimeFromDuration()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        // Started 60 mins ago, worked 20 mins, paused for the last 40 mins
+        var session = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            ActiveUserId = userId,
+            Title = "Paused Study",
+            StartTime = DateTime.UtcNow.AddMinutes(-60),
+            AccumulatedSeconds = 1200, // 20 mins active
+            IsPaused = true,
+            LastPausedAt = DateTime.UtcNow.AddMinutes(-40),
+            DurationMinutes = 20,
+            IsCompleted = false
+        };
+        _sessions.Add(session);
+
+        var endHandler = new EndStudySessionCommandHandler(
+            _dbContextMock.Object,
+            _currentUserServiceMock.Object,
+            _gamificationServiceMock.Object,
+            _achievementServiceMock.Object);
+
+        // Act
+        var result = await endHandler.Handle(new EndStudySessionCommand { SessionId = session.Id }, CancellationToken.None);
+
+        // Assert
+        result.IsCompleted.Should().BeTrue();
+        result.IsPaused.Should().BeFalse();
+        result.DurationMinutes.Should().Be(20); // 20 minutes, NOT 60 minutes!
+        session.ActiveUserId.Should().BeNull();
+        session.EndTime.Should().NotBeNull();
+        _gamificationServiceMock.Verify(g => g.AwardStudySessionXpAsync(userId, session, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task EndStudySession_AcrossMultiplePauseResumeCycles_CalculatesAccurateTotalFocusDuration()
+    {
+        // Arrange: 10 mins active segment 1, 15 mins pause, 15 mins active segment 2
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var session = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            ActiveUserId = userId,
+            Title = "Multi-Cycle Study",
+            StartTime = DateTime.UtcNow.AddMinutes(-40),
+            AccumulatedSeconds = 600, // 10 mins from segment 1
+            IsPaused = false,
+            LastResumedAt = DateTime.UtcNow.AddMinutes(-15), // Segment 2 running for 15 mins
+            IsCompleted = false
+        };
+        _sessions.Add(session);
+
+        var endHandler = new EndStudySessionCommandHandler(
+            _dbContextMock.Object,
+            _currentUserServiceMock.Object,
+            _gamificationServiceMock.Object,
+            _achievementServiceMock.Object);
+
+        // Act
+        var result = await endHandler.Handle(new EndStudySessionCommand { SessionId = session.Id }, CancellationToken.None);
+
+        // Assert: 10 mins + 15 mins = 25 mins active (ignoring the 15 min pause)
+        result.DurationMinutes.Should().BeGreaterThanOrEqualTo(24);
+        result.DurationMinutes.Should().BeLessThanOrEqualTo(26);
+        result.IsCompleted.Should().BeTrue();
+        session.ActiveUserId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task EndStudySession_WhenRepeated_IsIdempotentAndDoesNotDuplicateXp()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var session = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Title = "Already Ended",
+            StartTime = DateTime.UtcNow.AddMinutes(-30),
+            EndTime = DateTime.UtcNow.AddMinutes(-5),
+            DurationMinutes = 25,
+            AccumulatedSeconds = 1500,
+            IsCompleted = true,
+            IsPaused = false
+        };
+        _sessions.Add(session);
+
+        var endHandler = new EndStudySessionCommandHandler(
+            _dbContextMock.Object,
+            _currentUserServiceMock.Object,
+            _gamificationServiceMock.Object,
+            _achievementServiceMock.Object);
+
+        // Act
+        var result = await endHandler.Handle(new EndStudySessionCommand { SessionId = session.Id }, CancellationToken.None);
+
+        // Assert
+        result.IsCompleted.Should().BeTrue();
+        result.DurationMinutes.Should().Be(25);
+        _gamificationServiceMock.Verify(g => g.AwardStudySessionXpAsync(It.IsAny<Guid>(), It.IsAny<StudySession>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetActiveStudySession_WhenPaused_ReturnsSessionWithIsPausedTrueAndCorrectElapsedSeconds()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        _currentUserServiceMock.Setup(s => s.UserId).Returns(userId.ToString());
+
+        var session = new StudySession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            ActiveUserId = userId,
+            Title = "Paused Active",
+            StartTime = DateTime.UtcNow.AddMinutes(-40),
+            AccumulatedSeconds = 1200, // 20 mins active
+            IsPaused = true,
+            LastPausedAt = DateTime.UtcNow.AddMinutes(-20),
+            DurationMinutes = 20,
+            IsCompleted = false
+        };
+        _sessions.Add(session);
+
+        var queryHandler = new GetActiveStudySessionQueryHandler(_dbContextMock.Object, _currentUserServiceMock.Object);
+
+        // Act
+        var result = await queryHandler.Handle(new GetActiveStudySessionQuery(), CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.IsPaused.Should().BeTrue();
+        result.ElapsedSeconds.Should().Be(1200); // Equal to accumulated seconds when paused
+        result.DurationMinutes.Should().Be(20);
+    }
+
+    [Fact]
+    public async Task StudySessionsController_PauseSession_WhenRunning_ReturnsOk200()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<StudySessionsController>>();
+        var dto = new StudySessionDto { Id = sessionId, Title = "Paused", IsPaused = true, AccumulatedSeconds = 600 };
+
+        mediatorMock.Setup(m => m.Send(It.Is<PauseStudySessionCommand>(c => c.SessionId == sessionId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(dto);
+
+        var controller = new StudySessionsController(mediatorMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await controller.PauseSession(sessionId);
+
+        // Assert
+        var okResult = result.Should().BeOfType<OkObjectResult>().Subject;
+        okResult.StatusCode.Should().Be(200);
+        okResult.Value.Should().BeEquivalentTo(dto);
+    }
+
+    [Fact]
+    public async Task StudySessionsController_PauseSession_WhenInvalidState_ReturnsBadRequest400()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<StudySessionsController>>();
+
+        mediatorMock.Setup(m => m.Send(It.IsAny<PauseStudySessionCommand>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidStudySessionStateException("Cannot pause a completed session."));
+
+        var controller = new StudySessionsController(mediatorMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await controller.PauseSession(sessionId);
+
+        // Assert
+        var badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;
+        badRequest.StatusCode.Should().Be(400);
+    }
+
+    [Fact]
+    public async Task StudySessionsController_PauseSession_WhenNotFound_ReturnsNotFound404()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<StudySessionsController>>();
+
+        mediatorMock.Setup(m => m.Send(It.IsAny<PauseStudySessionCommand>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new StudySessionNotFoundException(sessionId));
+
+        var controller = new StudySessionsController(mediatorMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await controller.PauseSession(sessionId);
+
+        // Assert
+        var notFound = result.Should().BeOfType<NotFoundObjectResult>().Subject;
+        notFound.StatusCode.Should().Be(404);
+    }
+
+    [Fact]
+    public async Task StudySessionsController_ResumeSession_WhenPaused_ReturnsOk200()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<StudySessionsController>>();
+        var dto = new StudySessionDto { Id = sessionId, Title = "Resumed", IsPaused = false, AccumulatedSeconds = 600 };
+
+        mediatorMock.Setup(m => m.Send(It.Is<ResumeStudySessionCommand>(c => c.SessionId == sessionId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(dto);
+
+        var controller = new StudySessionsController(mediatorMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await controller.ResumeSession(sessionId);
+
+        // Assert
+        var okResult = result.Should().BeOfType<OkObjectResult>().Subject;
+        okResult.StatusCode.Should().Be(200);
+        okResult.Value.Should().BeEquivalentTo(dto);
+    }
+
+    [Fact]
+    public async Task StudySessionsController_ResumeSession_WhenInvalidState_ReturnsBadRequest400()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<StudySessionsController>>();
+
+        mediatorMock.Setup(m => m.Send(It.IsAny<ResumeStudySessionCommand>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidStudySessionStateException("Cannot resume a completed session."));
+
+        var controller = new StudySessionsController(mediatorMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await controller.ResumeSession(sessionId);
+
+        // Assert
+        var badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;
+        badRequest.StatusCode.Should().Be(400);
+    }
+
+    [Fact]
+    public async Task StudySessionsController_ResumeSession_WhenNotFound_ReturnsNotFound404()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var mediatorMock = new Mock<MediatR.IMediator>();
+        var loggerMock = new Mock<ILogger<StudySessionsController>>();
+
+        mediatorMock.Setup(m => m.Send(It.IsAny<ResumeStudySessionCommand>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new StudySessionNotFoundException(sessionId));
+
+        var controller = new StudySessionsController(mediatorMock.Object, loggerMock.Object);
+
+        // Act
+        var result = await controller.ResumeSession(sessionId);
+
+        // Assert
+        var notFound = result.Should().BeOfType<NotFoundObjectResult>().Subject;
+        notFound.StatusCode.Should().Be(404);
+    }
+
+    [Fact]
+    public void PauseStudySessionCommandValidator_WhenEmptyGuid_FailsValidation()
+    {
+        var validator = new PauseStudySessionCommandValidator();
+        var result = validator.Validate(new PauseStudySessionCommand { SessionId = Guid.Empty });
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.PropertyName == "SessionId");
+    }
+
+    [Fact]
+    public void ResumeStudySessionCommandValidator_WhenEmptyGuid_FailsValidation()
+    {
+        var validator = new ResumeStudySessionCommandValidator();
+        var result = validator.Validate(new ResumeStudySessionCommand { SessionId = Guid.Empty });
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.PropertyName == "SessionId");
+    }
 }
 
 

@@ -5,16 +5,19 @@ import '../../data/models/study_session_model.dart';
 import '../../data/repositories/study_session_repository.dart';
 
 class TimerScreen extends StatefulWidget {
-  const TimerScreen({super.key});
+  final StudySessionRepository? repository;
+
+  const TimerScreen({super.key, this.repository});
 
   @override
   State<TimerScreen> createState() => _TimerScreenState();
 }
 
-class _TimerScreenState extends State<TimerScreen> {
+class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
   late final StudySessionRepository _repository;
   List<StudySession> _sessions = [];
   bool _isLoading = true;
+  bool _isActionLoading = false;
 
   StudySession? _activeSession;
   Timer? _timer;
@@ -28,15 +31,54 @@ class _TimerScreenState extends State<TimerScreen> {
   @override
   void initState() {
     super.initState();
-    _repository = StudySessionRepository(NetworkClient());
+    WidgetsBinding.instance.addObserver(this);
+    _repository = widget.repository ?? StudySessionRepository(NetworkClient());
     _loadSessions();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _titleController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _activeSession != null) {
+      _syncActiveSession();
+    }
+  }
+
+  Future<void> _syncActiveSession() async {
+    if (_activeSession == null || _isActionLoading) return;
+    try {
+      final active = await _repository.getActiveSession();
+      if (!mounted) return;
+      if (active != null) {
+        setState(() {
+          _activeSession = active;
+          _elapsedSeconds = active.elapsedSeconds;
+          _isRunning = !active.isPaused;
+        });
+        if (_isRunning) {
+          _startTimer();
+        } else {
+          _timer?.cancel();
+        }
+      } else {
+        setState(() {
+          _activeSession = null;
+          _elapsedSeconds = 0;
+          _isRunning = false;
+        });
+        _timer?.cancel();
+        _loadSessions();
+      }
+    } catch (_) {
+      // Gracefully ignore sync errors in background/lifecycle transitions
+    }
   }
 
   Future<void> _loadSessions() async {
@@ -55,16 +97,13 @@ class _TimerScreenState extends State<TimerScreen> {
           _activeSession = activeSession;
           _titleController.text = activeSession.title;
           
-          final elapsed = DateTime.now().toUtc().difference(activeSession.startTime.toUtc()).inSeconds;
-          
-          // Determine if it was likely a pomodoro (just a heuristic, or default to stopwatch if resumed)
-          // For simplicity, we just resume as stopwatch if we don't know. 
-          // If they want persistent pomodoro state, it needs backend support.
           _isPomodoro = false;
-          _elapsedSeconds = elapsed > 0 ? elapsed : 0;
+          _elapsedSeconds = activeSession.elapsedSeconds;
+          _isRunning = !activeSession.isPaused;
           
-          _isRunning = true;
-          _startTimer();
+          if (_isRunning) {
+            _startTimer();
+          }
         }
       });
     } catch (e) {
@@ -78,6 +117,7 @@ class _TimerScreenState extends State<TimerScreen> {
   }
 
   Future<void> _startSession() async {
+    if (_isActionLoading) return;
     final title = _titleController.text.trim();
     if (title.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -86,13 +126,14 @@ class _TimerScreenState extends State<TimerScreen> {
       return;
     }
 
+    setState(() => _isActionLoading = true);
     try {
       final session = await _repository.startSession(title);
       if (!mounted) return;
       setState(() {
         _timer?.cancel();
         _activeSession = session;
-        _elapsedSeconds = _isPomodoro ? _pomodoroDuration : 0;
+        _elapsedSeconds = _isPomodoro ? _pomodoroDuration : session.elapsedSeconds;
         _isRunning = true;
       });
       _startTimer();
@@ -102,13 +143,56 @@ class _TimerScreenState extends State<TimerScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isActionLoading = false);
+      }
+    }
+  }
+
+  Future<void> _togglePause() async {
+    if (_activeSession == null || _isActionLoading) return;
+    setState(() => _isActionLoading = true);
+    try {
+      if (_isRunning) {
+        final updated = await _repository.pauseSession(_activeSession!.id);
+        if (!mounted) return;
+        _timer?.cancel();
+        setState(() {
+          _activeSession = updated;
+          _isRunning = false;
+          _elapsedSeconds = updated.elapsedSeconds;
+        });
+      } else {
+        final updated = await _repository.resumeSession(_activeSession!.id);
+        if (!mounted) return;
+        setState(() {
+          _activeSession = updated;
+          _isRunning = true;
+          _elapsedSeconds = updated.elapsedSeconds;
+        });
+        _startTimer();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      final message = e.toString().replaceFirst('Exception: ', '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isActionLoading = false);
+      }
     }
   }
 
   Future<void> _endSession() async {
-    if (_activeSession == null) return;
+    if (_activeSession == null || _isActionLoading) return;
     _timer?.cancel();
-    setState(() => _isRunning = false);
+    setState(() {
+      _isRunning = false;
+      _isActionLoading = true;
+    });
 
     try {
       await _repository.endSession(_activeSession!.id);
@@ -127,6 +211,10 @@ class _TimerScreenState extends State<TimerScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to end session: $message')),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isActionLoading = false);
+      }
     }
   }
 
@@ -149,16 +237,6 @@ class _TimerScreenState extends State<TimerScreen> {
     });
   }
 
-  void _togglePause() {
-    if (_isRunning) {
-      _timer?.cancel();
-      setState(() => _isRunning = false);
-    } else {
-      _startTimer();
-      setState(() => _isRunning = true);
-    }
-  }
-
   String get _formattedTime {
     final hours = _elapsedSeconds ~/ 3600;
     final minutes = (_elapsedSeconds % 3600) ~/ 60;
@@ -178,50 +256,79 @@ class _TimerScreenState extends State<TimerScreen> {
         elevation: 0,
         title: const Text('Focus Timer', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
-      body: Column(
-        children: [
-          const SizedBox(height: 20),
-          _buildTimerDisplay(),
-          const SizedBox(height: 30),
-          _buildControls(),
-          const SizedBox(height: 30),
-          const Divider(color: Colors.white24),
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('History', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            const SizedBox(height: 16),
+            _buildTimerDisplay(),
+            const SizedBox(height: 24),
+            _buildControls(),
+            const SizedBox(height: 24),
+            const Divider(color: Colors.white24),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('History', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
             ),
-          ),
-          Expanded(child: _buildHistoryList()),
-        ],
+            _buildHistoryList(),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildTimerDisplay() {
     return Container(
-      width: 250,
-      height: 250,
+      width: 240,
+      height: 240,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        border: Border.all(color: const Color(0xFF6C5CE7), width: 8),
+        border: Border.all(
+          color: _isRunning ? const Color(0xFF6C5CE7) : Colors.amber.shade700,
+          width: 8,
+        ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6C5CE7).withOpacity(0.2),
+            color: (_isRunning ? const Color(0xFF6C5CE7) : Colors.amber.shade700).withOpacity(0.2),
             blurRadius: 30,
             spreadRadius: 5,
           )
         ],
       ),
       child: Center(
-        child: Text(
-          _formattedTime,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 56,
-            fontWeight: FontWeight.w300,
-          ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              _formattedTime,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 52,
+                fontWeight: FontWeight.w300,
+              ),
+            ),
+            if (_activeSession != null) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _isRunning ? const Color(0xFF00D9C0).withOpacity(0.2) : Colors.amber.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  _isRunning ? 'FOCUSING' : 'PAUSED',
+                  style: TextStyle(
+                    color: _isRunning ? const Color(0xFF00D9C0) : Colors.amber,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );
@@ -273,13 +380,19 @@ class _TimerScreenState extends State<TimerScreen> {
           ),
           const SizedBox(height: 10),
           ElevatedButton(
-            onPressed: _startSession,
+            onPressed: _isActionLoading ? null : _startSession,
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF6C5CE7),
               padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
             ),
-            child: const Text('START FOCUS', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+            child: _isActionLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                  )
+                : const Text('START FOCUS', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
           ),
         ],
       );
@@ -289,16 +402,18 @@ class _TimerScreenState extends State<TimerScreen> {
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         IconButton(
-          onPressed: _togglePause,
+          key: const Key('pauseResumeButton'),
+          onPressed: _isActionLoading ? null : _togglePause,
           iconSize: 48,
-          color: Colors.white,
+          color: _isActionLoading ? Colors.white38 : Colors.white,
           icon: Icon(_isRunning ? Icons.pause_circle_filled : Icons.play_circle_filled),
         ),
         const SizedBox(width: 20),
         IconButton(
-          onPressed: _endSession,
+          key: const Key('stopButton'),
+          onPressed: _isActionLoading ? null : _endSession,
           iconSize: 48,
-          color: Colors.redAccent,
+          color: _isActionLoading ? Colors.redAccent.withOpacity(0.4) : Colors.redAccent,
           icon: const Icon(Icons.stop_circle),
         ),
       ],
@@ -306,10 +421,26 @@ class _TimerScreenState extends State<TimerScreen> {
   }
 
   Widget _buildHistoryList() {
-    if (_isLoading) return const Center(child: CircularProgressIndicator(color: Color(0xFF6C5CE7)));
-    if (_sessions.isEmpty) return const Center(child: Text('No sessions yet.', style: TextStyle(color: Colors.white54)));
+    if (_isLoading) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24.0),
+          child: CircularProgressIndicator(color: Color(0xFF6C5CE7)),
+        ),
+      );
+    }
+    if (_sessions.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24.0),
+          child: Text('No sessions yet.', style: TextStyle(color: Colors.white54)),
+        ),
+      );
+    }
 
     return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       itemCount: _sessions.length,
       itemBuilder: (context, index) {
         final session = _sessions[index];
