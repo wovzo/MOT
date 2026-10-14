@@ -2466,3 +2466,74 @@ Phase 10 completes Subjects and Daily Study Goals across the .NET 8 backend and 
 
 ---
 
+## Phase 11 — Dashboard Integration
+
+**Status: COMPLETED / VERIFIED**
+
+Phase 11 integrates all study productivity features into a unified, data-driven, and cohesive Dashboard in both the .NET 8 backend and Flutter frontend, strictly upholding Clean Architecture, CQRS/MediatR, Riverpod state management, and all safety constraints.
+
+### 1. Implemented Architecture & Design Decisions
+- **Unified Composite Aggregate Query (`GetDashboardSummaryQuery`):**
+  - Prompt requirement: Prevent client round-trip thrashing and data inconsistency resulting from 7+ separate parallel network calls (daily goals, active session, tasks, habits, streak, gamification, subjects, recent sessions, weekly activity).
+  - Single, high-performance aggregate endpoint `GET /api/dashboard?timeZoneOffsetMinutes=...` queries indexed user-owned records in a single transactional read.
+  - Returns `DashboardSummaryDto` encapsulating:
+    1. `DailyGoal`: Today's configured or default (60m) target, actual focused minutes, remaining minutes, progress percentage, achieved status, and completed sessions count.
+    2. `ActiveSession`: Accurate elapsed time (`ElapsedSeconds`, `DurationMinutes`), subject name, and pause state (`IsPaused`), or `null` if idle.
+    3. `Tasks`: Total tasks count, completed count, pending count, completion rate percentage, and top 3 pending tasks for quick view.
+    4. `Habits`: Total habits count, completed today count, completion percentage, and habit list with individual streak counters.
+    5. `Streak`: Reliable, deterministic streak calculation computed across all user habit completions via `HabitStreakCalculator.CalculateStreak(allCompletions, targetDate)`, plus calculated `LongestStreak`.
+    6. `Gamification`: Current level, total XP, level thresholds, progress fraction/percentage, and unlocked vs total achievements count.
+    7. `Subjects`: Full user subject list with custom hex colors.
+    8. `RecentSessions`: Top 5 completed study sessions ordered by completion time with duration and subject metadata.
+    9. `WeeklyActivity`: 7-day rolling window of daily focus minutes and completed session counts ending on the user's current local date.
+- **Accurate Today Focus Time & Daily Goal Parity:**
+  - Today's focused minutes are calculated strictly from completed study sessions (`IsCompleted == true` and `EndTime != null`), excluding paused intervals (`DurationMinutes = AccumulatedSeconds / 60`).
+  - Active or incomplete sessions are strictly excluded from completed focus time.
+  - Client timezone offset adjusts the 24-hour UTC window so sessions completed near local midnight boundaries are attributed to the correct calendar day.
+- **Reliable Streak Calculation:**
+  - Evaluates consecutive days of habit completions backwards from today (or yesterday if today is not yet completed).
+  - Flags `IsActiveToday` so UI clearly indicates whether today's study activity is already recorded.
+  - Zero placeholder or hardcoded streak values.
+- **Database Safety:**
+  - Zero schema changes or new migrations needed; pure aggregation over existing tables.
+  - `dotnet ef migrations has-pending-model-changes` verified: **0 pending model changes**.
+  - Zero remote database connections or migration commands executed.
+
+### 2. Endpoints Implemented
+- `GET /api/dashboard?timeZoneOffsetMinutes={offset}`: Returns `200 OK` with `DashboardSummaryDto`. Authenticated via JWT Bearer (`ICurrentUserService.UserId`).
+
+### 3. Flutter Integration
+- **Feature Structure (`frontend/lib/features/dashboard/`):**
+  - Models (`data/models/dashboard_summary_model.dart`): `DashboardSummary`, `DashboardTaskSummary`, `DashboardHabitSummary`, `DashboardStreakSummary`, `DashboardDayActivity`.
+  - Repository (`data/repositories/dashboard_repository.dart`): `DashboardRepository.getDashboardSummary({int? timeZoneOffsetMinutes})`.
+  - Provider (`presentation/providers/dashboard_provider.dart`): `dashboardRepositoryProvider`, `dashboardSummaryProvider` (`FutureProvider.autoDispose`).
+  - Screen (`presentation/screens/dashboard_screen.dart`):
+    - **Header:** Welcome greeting, XP & Level card with progress bar (tappable to Achievements), and Streak flame badge with active state styling.
+    - **Active Session Banner:** Glow card with pulse status ("IN PROGRESS" / "PAUSED"), elapsed timer display, and quick "Open Timer" button.
+    - **Daily Study Goal Card:** Circular progress ring, actual vs target focus time, remaining minutes, goal achieved badge, and direct "Configure" link to `DailyGoalsScreen`.
+    - **Weekly Activity Chart:** 7-day bar chart showing daily focus minutes with day labels and total weekly focus summary.
+    - **Tasks & Habits Grid:** 2-column cards showing today's completion ratio, completion percentage, and one-tap navigation to `TaskDashboardScreen` and `HabitDashboardScreen`.
+    - **Subjects Section:** Color-coded subject chips with "+ Manage" shortcut to `SubjectsScreen`.
+    - **Recent Sessions Section:** List of recent completed study sessions with duration and timestamps.
+    - **Pull-to-Refresh:** Pull down on list invokes `ref.refresh(dashboardSummaryProvider.future)`.
+- **Navigation Update (`frontend/lib/core/presentation/screens/home_screen.dart`):**
+  - Elevated `DashboardScreen` to primary Tab 0 ("Dashboard", `Icons.dashboard_rounded`).
+  - Navigation tabs: `Dashboard` (0), `Tasks` (1), `Habits` (2), `Timer` (3), `Profile` (4).
+  - Tapping cards on Dashboard switches tabs or opens feature screens seamlessly.
+  - Classroom / Live Study room accessible directly from Dashboard's top bar action button.
+
+### 4. Verification & Test Suite
+- **Backend Tests (`MOT.Tests`):**
+  - `DashboardHandlerTests.cs`: 5 tests covering:
+    - `GetDashboardSummary_WhenUnauthenticated_ThrowsUnauthorized`
+    - `GetDashboardSummary_WhenUserNotFound_ThrowsUserNotFound`
+    - `GetDashboardSummary_WhenUserHasEmptyData_ReturnsHealthyDefaults`
+    - `GetDashboardSummary_WithPopulatedData_ReturnsAccurateMetrics`
+    - `DashboardController_GetDashboardSummary_ReturnsOkResult`
+  - Total backend tests: **506 / 506 passed (100%)**.
+- **Frontend Tests (`frontend/test`):**
+  - `dashboard_model_and_repository_test.dart`: 4 tests covering full JSON deserialization, empty fallback resilience, repository network responses, and error handling.
+  - `dashboard_screen_test.dart`: 4 widget tests covering loading state with spinner, error state with retry button, full populated UI rendering (header, streak, daily goal, active session banner, weekly activity, tasks, habits, subjects, recent sessions), and tab navigation callbacks.
+  - Total Flutter tests: **89 / 89 passed (100%)**.
+  - `flutter analyze --no-fatal-infos`: **0 errors, 0 warnings**.
+
