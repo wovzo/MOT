@@ -44,12 +44,12 @@ class AppTheme {
           textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16, fontFamily: 'Inter'),
         ),
       ),
-      cardTheme: CardThemeData(
-        color: Colors.white.withValues(alpha: 0.08),
+      cardTheme: CardTheme(
+        color: Colors.white.withOpacity(0.08),
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
+          side: BorderSide(color: Colors.white.withOpacity(0.05)),
         ),
       ),
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(

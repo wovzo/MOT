@@ -140,7 +140,7 @@ class DashboardScreen extends ConsumerWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF1E1B3A),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -175,13 +175,13 @@ class DashboardScreen extends ConsumerWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     color: streak.isActiveToday
-                        ? AppTheme.streakAmber.withValues(alpha: 0.2)
-                        : Colors.white.withValues(alpha: 0.06),
+                        ? AppTheme.streakAmber.withOpacity(0.2)
+                        : Colors.white.withOpacity(0.06),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
                       color: streak.isActiveToday
-                          ? AppTheme.streakAmber.withValues(alpha: 0.6)
-                          : Colors.white.withValues(alpha: 0.1),
+                          ? AppTheme.streakAmber.withOpacity(0.6)
+                          : Colors.white.withOpacity(0.1),
                     ),
                   ),
                   child: Row(
@@ -222,7 +222,7 @@ class DashboardScreen extends ConsumerWidget {
             child: Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.04),
+                color: Colors.white.withOpacity(0.04),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -230,7 +230,7 @@ class DashboardScreen extends ConsumerWidget {
                   Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      color: AppTheme.focusPurple.withValues(alpha: 0.2),
+                      color: AppTheme.focusPurple.withOpacity(0.2),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(Icons.military_tech_rounded, color: AppTheme.focusPurple, size: 20),
@@ -266,7 +266,7 @@ class DashboardScreen extends ConsumerWidget {
                           borderRadius: BorderRadius.circular(4),
                           child: LinearProgressIndicator(
                             value: game.progressFraction.clamp(0.0, 1.0),
-                            backgroundColor: Colors.white.withValues(alpha: 0.1),
+                            backgroundColor: Colors.white.withOpacity(0.1),
                             valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.focusPurple),
                             minHeight: 5,
                           ),
@@ -292,9 +292,9 @@ class DashboardScreen extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.focusPurple.withValues(alpha: 0.15),
+        color: AppTheme.focusPurple.withOpacity(0.15),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.focusPurple.withValues(alpha: 0.5)),
+        border: Border.all(color: AppTheme.focusPurple.withOpacity(0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -389,7 +389,7 @@ class DashboardScreen extends ConsumerWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF1E1B3A),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -403,7 +403,7 @@ class DashboardScreen extends ConsumerWidget {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: AppTheme.growthTeal.withValues(alpha: 0.15),
+                        color: AppTheme.growthTeal.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: const Icon(Icons.track_changes_rounded, color: AppTheme.growthTeal, size: 20),
@@ -458,7 +458,7 @@ class DashboardScreen extends ConsumerWidget {
                   children: [
                     CircularProgressIndicator(
                       value: percentage / 100.0,
-                      backgroundColor: Colors.white.withValues(alpha: 0.08),
+                      backgroundColor: Colors.white.withOpacity(0.08),
                       valueColor: AlwaysStoppedAnimation<Color>(
                         isAchieved ? AppTheme.growthTeal : AppTheme.focusPurple,
                       ),
@@ -529,7 +529,7 @@ class DashboardScreen extends ConsumerWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF1E1B3A),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -583,7 +583,7 @@ class DashboardScreen extends ConsumerWidget {
                       decoration: BoxDecoration(
                         color: day.focusMinutes > 0
                             ? (isToday ? AppTheme.growthTeal : AppTheme.focusPurple)
-                            : Colors.white.withValues(alpha: 0.08),
+                            : Colors.white.withOpacity(0.08),
                         borderRadius: BorderRadius.circular(6),
                       ),
                     ),
@@ -628,7 +628,7 @@ class DashboardScreen extends ConsumerWidget {
               decoration: BoxDecoration(
                 color: const Color(0xFF1E1B3A),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                border: Border.all(color: Colors.white.withOpacity(0.08)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -639,7 +639,7 @@ class DashboardScreen extends ConsumerWidget {
                       Container(
                         padding: const EdgeInsets.all(6),
                         decoration: BoxDecoration(
-                          color: AppTheme.growthTeal.withValues(alpha: 0.15),
+                          color: AppTheme.growthTeal.withOpacity(0.15),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(Icons.check_circle_outline, color: AppTheme.growthTeal, size: 18),
@@ -685,7 +685,7 @@ class DashboardScreen extends ConsumerWidget {
               decoration: BoxDecoration(
                 color: const Color(0xFF1E1B3A),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                border: Border.all(color: Colors.white.withOpacity(0.08)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -696,7 +696,7 @@ class DashboardScreen extends ConsumerWidget {
                       Container(
                         padding: const EdgeInsets.all(6),
                         decoration: BoxDecoration(
-                          color: AppTheme.focusPurple.withValues(alpha: 0.2),
+                          color: AppTheme.focusPurple.withOpacity(0.2),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(Icons.repeat_rounded, color: AppTheme.focusPurple, size: 18),
@@ -736,7 +736,7 @@ class DashboardScreen extends ConsumerWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF1E1B3A),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -798,9 +798,9 @@ class DashboardScreen extends ConsumerWidget {
                 return Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: chipColor.withValues(alpha: 0.15),
+                    color: chipColor.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: chipColor.withValues(alpha: 0.4)),
+                    border: Border.all(color: chipColor.withOpacity(0.4)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -835,7 +835,7 @@ class DashboardScreen extends ConsumerWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF1E1B3A),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -891,7 +891,7 @@ class DashboardScreen extends ConsumerWidget {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: recentSessions.length,
-              separatorBuilder: (_, __) => Divider(color: Colors.white.withValues(alpha: 0.06), height: 16),
+              separatorBuilder: (_, __) => Divider(color: Colors.white.withOpacity(0.06), height: 16),
               itemBuilder: (context, index) {
                 final session = recentSessions[index];
                 return Row(
@@ -899,7 +899,7 @@ class DashboardScreen extends ConsumerWidget {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: AppTheme.focusPurple.withValues(alpha: 0.15),
+                        color: AppTheme.focusPurple.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: const Icon(Icons.timer_outlined, color: AppTheme.focusPurple, size: 18),

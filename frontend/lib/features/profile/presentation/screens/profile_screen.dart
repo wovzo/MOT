@@ -184,14 +184,14 @@ class ProfileScreen extends ConsumerWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            AppTheme.focusPurple.withValues(alpha: 0.35),
-            AppTheme.growthTeal.withValues(alpha: 0.12),
+            AppTheme.focusPurple.withOpacity(0.35),
+            AppTheme.growthTeal.withOpacity(0.12),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.focusPurple.withValues(alpha: 0.35)),
+        border: Border.all(color: AppTheme.focusPurple.withOpacity(0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -243,7 +243,7 @@ class ProfileScreen extends ConsumerWidget {
             child: LinearProgressIndicator(
               value: fraction,
               minHeight: 10,
-              backgroundColor: Colors.white.withValues(alpha: 0.1),
+              backgroundColor: Colors.white.withOpacity(0.1),
               valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.growthTeal),
             ),
           ),
@@ -284,16 +284,16 @@ class ProfileScreen extends ConsumerWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.05),
+          color: Colors.white.withOpacity(0.05),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+          border: Border.all(color: Colors.white.withOpacity(0.06)),
         ),
         child: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: AppTheme.streakAmber.withValues(alpha: 0.2),
+                color: AppTheme.streakAmber.withOpacity(0.2),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.emoji_events_rounded, color: AppTheme.streakAmber, size: 24),
@@ -337,16 +337,16 @@ class ProfileScreen extends ConsumerWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
+              color: Colors.white.withOpacity(0.05),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+              border: Border.all(color: Colors.white.withOpacity(0.06)),
             ),
             child: Row(
               children: [
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF00D9C0).withValues(alpha: 0.2),
+                    color: const Color(0xFF00D9C0).withOpacity(0.2),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.flag_rounded, color: Color(0xFF00D9C0), size: 24),
@@ -386,16 +386,16 @@ class ProfileScreen extends ConsumerWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
+              color: Colors.white.withOpacity(0.05),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+              border: Border.all(color: Colors.white.withOpacity(0.06)),
             ),
             child: Row(
               children: [
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF6C5CE7).withValues(alpha: 0.2),
+                    color: const Color(0xFF6C5CE7).withOpacity(0.2),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.auto_stories_rounded, color: Color(0xFFA29BFE), size: 24),
@@ -458,7 +458,7 @@ class ProfileScreen extends ConsumerWidget {
           error: (error, _) => Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.03),
+              color: Colors.white.withOpacity(0.03),
               borderRadius: BorderRadius.circular(16),
             ),
             child: const Center(
@@ -474,9 +474,9 @@ class ProfileScreen extends ConsumerWidget {
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.03),
+                  color: Colors.white.withOpacity(0.03),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.04)),
+                  border: Border.all(color: Colors.white.withOpacity(0.04)),
                 ),
                 child: const Center(
                   child: Text(
@@ -527,16 +527,16 @@ class ProfileScreen extends ConsumerWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
+        color: Colors.white.withOpacity(0.04),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.04)),
+        border: Border.all(color: Colors.white.withOpacity(0.04)),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: iconColor.withValues(alpha: 0.15),
+              color: iconColor.withOpacity(0.15),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: iconColor, size: 18),
@@ -641,9 +641,9 @@ class _StatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
+        color: Colors.white.withOpacity(0.05),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

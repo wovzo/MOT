@@ -129,14 +129,14 @@ class AchievementsScreen extends ConsumerWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            AppTheme.focusPurple.withValues(alpha: 0.3),
-            AppTheme.growthTeal.withValues(alpha: 0.15),
+            AppTheme.focusPurple.withOpacity(0.3),
+            AppTheme.growthTeal.withOpacity(0.15),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.focusPurple.withValues(alpha: 0.3)),
+        border: Border.all(color: AppTheme.focusPurple.withOpacity(0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -174,7 +174,7 @@ class AchievementsScreen extends ConsumerWidget {
             child: LinearProgressIndicator(
               value: progressRatio,
               minHeight: 8,
-              backgroundColor: Colors.white.withValues(alpha: 0.1),
+              backgroundColor: Colors.white.withOpacity(0.1),
               valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.growthTeal),
             ),
           ),
@@ -192,13 +192,13 @@ class AchievementsScreen extends ConsumerWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: isUnlocked
-            ? Colors.white.withValues(alpha: 0.07)
-            : Colors.white.withValues(alpha: 0.02),
+            ? Colors.white.withOpacity(0.07)
+            : Colors.white.withOpacity(0.02),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isUnlocked
-              ? AppTheme.streakAmber.withValues(alpha: 0.4)
-              : Colors.white.withValues(alpha: 0.05),
+              ? AppTheme.streakAmber.withOpacity(0.4)
+              : Colors.white.withOpacity(0.05),
           width: isUnlocked ? 1.5 : 1.0,
         ),
       ),
@@ -210,8 +210,8 @@ class AchievementsScreen extends ConsumerWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: isUnlocked
-                  ? AppTheme.streakAmber.withValues(alpha: 0.2)
-                  : Colors.white.withValues(alpha: 0.05),
+                  ? AppTheme.streakAmber.withOpacity(0.2)
+                  : Colors.white.withOpacity(0.05),
             ),
             child: Icon(
               iconData,
@@ -241,8 +241,8 @@ class AchievementsScreen extends ConsumerWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
                         color: isUnlocked
-                            ? AppTheme.growthTeal.withValues(alpha: 0.2)
-                            : Colors.white.withValues(alpha: 0.05),
+                            ? AppTheme.growthTeal.withOpacity(0.2)
+                            : Colors.white.withOpacity(0.05),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
