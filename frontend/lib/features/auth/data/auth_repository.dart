@@ -53,6 +53,28 @@ class AuthRepository {
     }
   }
 
+  Future<void> sendPasswordResetOtp(String email) async {
+    try {
+      await _networkClient.dio.post('auth/forgot-password', data: {
+        'email': email,
+      });
+    } on DioException catch (e) {
+      throw Exception(_extractErrorMessage(e, 'Failed to send verification code'));
+    }
+  }
+
+  Future<void> resetPasswordWithOtp(String email, String otp, String newPassword) async {
+    try {
+      await _networkClient.dio.post('auth/reset-password-otp', data: {
+        'email': email,
+        'otp': otp,
+        'newPassword': newPassword,
+      });
+    } on DioException catch (e) {
+      throw Exception(_extractErrorMessage(e, 'Reset password failed'));
+    }
+  }
+
   Future<UserProfile> getProfile() async {
     try {
       final response = await _networkClient.dio.get('auth/me');

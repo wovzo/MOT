@@ -15,6 +15,7 @@ public interface IAppDbContext
     DbSet<UserAchievement> UserAchievements { get; }
     DbSet<Subject> Subjects { get; }
     DbSet<DailyGoal> DailyGoals { get; }
+    DbSet<PasswordResetOtp> PasswordResetOtps { get; }
     
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
 }

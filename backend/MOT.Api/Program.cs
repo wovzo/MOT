@@ -72,6 +72,7 @@ builder.Services.AddScoped<MOT.Application.Common.Interfaces.IAppDbContext>(prov
 builder.Services.AddScoped<IAuthRepository, AuthRepository>();
 builder.Services.AddScoped<IJwtProvider, JwtProvider>();
 builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
+builder.Services.AddScoped<IEmailService, MOT.Infrastructure.Services.SmtpEmailService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IGamificationService, GamificationService>();

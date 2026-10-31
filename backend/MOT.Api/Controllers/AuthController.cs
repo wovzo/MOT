@@ -107,6 +107,48 @@ namespace MOT.Api.Controllers
             });
         }
 
+        [HttpPost("forgot-password")]
+        public async Task<IActionResult> ForgotPassword([FromBody] MOT.Application.Users.Commands.SendPasswordResetOtpCommand command)
+        {
+            try
+            {
+                await _mediator.Send(command);
+                return Ok(new { message = "If an account exists with this email, a 6-digit verification code has been sent." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error in ForgotPassword for email {Email}", command?.Email);
+                return StatusCode(500, new { error = "An unexpected error occurred while processing your request." });
+            }
+        }
+
+        [HttpPost("reset-password-otp")]
+        public async Task<IActionResult> ResetPasswordWithOtp([FromBody] MOT.Application.Users.Commands.ResetPasswordWithOtpCommand command)
+        {
+            try
+            {
+                await _mediator.Send(command);
+                return Ok(new { message = "Password reset successfully. Please log in with your new password." });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (UserNotFoundException)
+            {
+                return NotFound(new { error = "User not found." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error in ResetPasswordWithOtp");
+                return StatusCode(500, new { error = "An unexpected error occurred while resetting password." });
+            }
+        }
+
         [Authorize]
         [HttpPost("change-password")]
         public async Task<IActionResult> ChangePassword([FromBody] MOT.Application.Users.Commands.ChangePasswordCommand command)

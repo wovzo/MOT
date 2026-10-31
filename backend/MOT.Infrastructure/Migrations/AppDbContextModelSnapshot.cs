@@ -132,6 +132,40 @@ namespace MOT.Infrastructure.Migrations
                     b.ToTable("HabitCompletions");
                 });
 
+            modelBuilder.Entity("MOT.Domain.Entities.PasswordResetOtp", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<bool>("IsUsed")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("OtpHash")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Email");
+
+                    b.HasIndex("Email", "IsUsed", "ExpiresAt");
+
+                    b.ToTable("PasswordResetOtps");
+                });
+
             modelBuilder.Entity("MOT.Domain.Entities.RoomParticipant", b =>
                 {
                     b.Property<Guid>("Id")

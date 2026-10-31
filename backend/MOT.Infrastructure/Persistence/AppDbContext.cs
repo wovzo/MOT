@@ -18,6 +18,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<UserAchievement> UserAchievements { get; set; }
     public DbSet<Subject> Subjects { get; set; }
     public DbSet<DailyGoal> DailyGoals { get; set; }
+    public DbSet<PasswordResetOtp> PasswordResetOtps { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -197,6 +198,19 @@ public class AppDbContext : DbContext, IAppDbContext
                   .IsUnique();
 
             entity.HasIndex(e => new { e.UserId, e.UnlockedAt });
+        });
+
+        modelBuilder.Entity<PasswordResetOtp>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Email)
+                  .HasMaxLength(255)
+                  .IsRequired();
+            entity.Property(e => e.OtpHash)
+                  .HasMaxLength(255)
+                  .IsRequired();
+            entity.HasIndex(e => e.Email);
+            entity.HasIndex(e => new { e.Email, e.IsUsed, e.ExpiresAt });
         });
     }
 }
