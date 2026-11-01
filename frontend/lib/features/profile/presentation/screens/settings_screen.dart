@@ -7,6 +7,149 @@ import '../../../gamification/presentation/providers/gamification_providers.dart
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
+  void _showChangePasswordDialog(BuildContext context, WidgetRef ref) {
+    final currentPasswordController = TextEditingController();
+    final newPasswordController = TextEditingController();
+    final confirmPasswordController = TextEditingController();
+    bool isLoading = false;
+    String? errorMessage;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1A38),
+          title: const Text('Change Password', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (errorMessage != null) ...[
+                  Text(errorMessage!, style: const TextStyle(color: Colors.redAccent, fontSize: 13)),
+                  const SizedBox(height: 12),
+                ],
+                TextField(
+                  controller: currentPasswordController,
+                  obscureText: true,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: 'Current Password',
+                    labelStyle: const TextStyle(color: Colors.white54),
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: const BorderSide(color: Colors.white24),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: const BorderSide(color: Color(0xFF6C5CE7)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: newPasswordController,
+                  obscureText: true,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: 'New Password',
+                    labelStyle: const TextStyle(color: Colors.white54),
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: const BorderSide(color: Colors.white24),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: const BorderSide(color: Color(0xFF6C5CE7)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: confirmPasswordController,
+                  obscureText: true,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: 'Confirm New Password',
+                    labelStyle: const TextStyle(color: Colors.white54),
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: const BorderSide(color: Colors.white24),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: const BorderSide(color: Color(0xFF6C5CE7)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+                if (isLoading) ...[
+                  const SizedBox(height: 16),
+                  const Center(child: CircularProgressIndicator(color: Color(0xFF6C5CE7))),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isLoading ? null : () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6C5CE7)),
+              onPressed: isLoading
+                  ? null
+                  : () async {
+                      final currentPassword = currentPasswordController.text;
+                      final newPassword = newPasswordController.text;
+                      final confirmPassword = confirmPasswordController.text;
+
+                      if (currentPassword.isEmpty) {
+                        setState(() => errorMessage = 'Current password is required.');
+                        return;
+                      }
+                      if (newPassword.length < 6) {
+                        setState(() => errorMessage = 'New password must be at least 6 characters.');
+                        return;
+                      }
+                      if (newPassword != confirmPassword) {
+                        setState(() => errorMessage = 'New passwords do not match.');
+                        return;
+                      }
+
+                      setState(() {
+                        isLoading = true;
+                        errorMessage = null;
+                      });
+
+                      try {
+                        final authRepo = ref.read(authRepositoryProvider);
+                        await authRepo.changePassword(currentPassword, newPassword);
+                        if (dialogContext.mounted) {
+                          Navigator.of(dialogContext).pop();
+                        }
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Password changed successfully.')),
+                          );
+                        }
+                      } catch (e) {
+                        if (dialogContext.mounted) {
+                          setState(() {
+                            isLoading = false;
+                            errorMessage = e.toString().replaceFirst('Exception: ', '');
+                          });
+                        }
+                      }
+                    },
+              child: const Text('Update Password', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showDeleteAccountDialog(BuildContext context, WidgetRef ref) {
     final passwordController = TextEditingController();
     bool isLoading = false;
@@ -139,6 +282,15 @@ class SettingsScreen extends ConsumerWidget {
                 style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
+              ListTile(
+                leading: const Icon(Icons.lock_reset, color: Color(0xFF00D9C0)),
+                title: const Text('Change Password', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                subtitle: const Text('Update your login password', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  _showChangePasswordDialog(context, ref);
+                },
+              ),
               ListTile(
                 leading: const Icon(Icons.delete_forever, color: Colors.redAccent),
                 title: const Text('Delete Account', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w600)),

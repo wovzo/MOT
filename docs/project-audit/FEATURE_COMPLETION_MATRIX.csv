@@ -1,0 +1,53 @@
+Module,Feature,Flutter UI,Backend,Database,API Integration,Automated Tests,Overall Status,Notes
+Authentication and User Management,User Registration,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Email/pass registration with PBKDF2 hashing
+Authentication and User Management,User Login,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,JWT token issuance with 120s timeout
+Authentication and User Management,Token Refresh / Session Expiry,NEEDS IMPROVEMENT,PARTIALLY COMPLETE,NOT STARTED,PARTIALLY COMPLETE,NOT STARTED,NEEDS IMPROVEMENT,No refresh token rotation; token expiration triggers 401 without auto-refresh
+Authentication and User Management,Password Reset (Email OTP),COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,6-digit email OTP via SMTP; dialog in Flutter login screen
+Authentication and User Management,Change Password,UI ONLY,COMPLETE,COMPLETE,NOT STARTED,BACKEND ONLY,PARTIALLY COMPLETE,Backend endpoint exists; missing UI trigger in Settings/Profile
+Authentication and User Management,Account Deletion,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Password confirmation dialog in Settings with cascading delete
+Onboarding and Profile,Onboarding Carousel,COMPLETE,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,PARTIALLY COMPLETE,3-slide PageView with SharedPreferences; only triggered after registration
+Onboarding and Profile,Profile View (Stats & XP),COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Consumes /api/auth/me and gamification endpoints with Riverpod
+Onboarding and Profile,Edit Profile (Display Name),NOT STARTED,COMPLETE,COMPLETE,NOT STARTED,BACKEND ONLY,PARTIALLY COMPLETE,Backend PUT /api/auth/profile exists; no edit UI or repository method in Flutter
+Onboarding and Profile,Avatar / Photo Upload,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,Static default circle avatar icon only
+Dashboard,Dashboard Aggregate View,COMPLETE,COMPLETE,COMPLETE,COMPLETE,PARTIALLY COMPLETE,COMPLETE,Unified GET /api/dashboard with timezone offset; widget test has CardTheme SDK bug
+Dashboard,Active Session Glow Banner,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Live elapsed time display and one-tap resume to Timer screen
+Dashboard,Daily Goal Progress Ring,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Accurate focus time percentage with link to configuration
+Dashboard,Weekly Activity Chart,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,7-day focus minutes bar chart with day labels
+Dashboard,Tasks & Habits Quick Ratio,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Two-column cards with quick navigation to tabs
+Subjects,Subject Management CRUD,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Full CRUD in Flutter and ASP.NET Core with custom hex colors
+Subjects,Subject Scoped Filtering,PARTIALLY COMPLETE,COMPLETE,COMPLETE,PARTIALLY COMPLETE,COMPLETE,PARTIALLY COMPLETE,Entities support SubjectId; TimerScreen does not yet let user pick subject
+Study Timer,Focus Timer Controls,COMPLETE,COMPLETE,COMPLETE,COMPLETE,PARTIALLY COMPLETE,COMPLETE,Start/Pause/Resume/End with reactive state and lifecycle recovery
+Study Timer,Timer Screen Configuration,NEEDS IMPROVEMENT,COMPLETE,COMPLETE,NEEDS IMPROVEMENT,PARTIALLY COMPLETE,NEEDS IMPROVEMENT,Missing subject dropdown, break reminders, and timer alarm audio
+Study Sessions,Session Lifecycle State Machine,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Idempotent pause/resume with server-authoritative duration accounting
+Study Sessions,Single Active Session Constraint,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Enforced via filtered unique database index and per-user lock
+Daily Goals,Daily Focus Goal Setting,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Calendar date picker with preset chips (30/45/60/90/120/180m)
+Daily Goals,Goal Progress Calculation,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Strictly sums completed session seconds excluding pause time
+Planner and Tasks,Task Listing & Creation,COMPLETE,COMPLETE,COMPLETE,COMPLETE,PARTIALLY COMPLETE,COMPLETE,Quick add bottom sheet and task list
+Planner and Tasks,Task Completion Toggle,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,PATCH /api/tasks/{id}/toggle with optimistic/async update
+Planner and Tasks,Task Edit & Delete,NOT STARTED,COMPLETE,COMPLETE,NOT STARTED,BACKEND ONLY,PARTIALLY COMPLETE,Backend has PUT/DELETE; Flutter UI and repository lack methods
+Planner and Tasks,Task Architecture / State,NEEDS IMPROVEMENT,COMPLETE,COMPLETE,NEEDS IMPROVEMENT,NOT STARTED,NEEDS IMPROVEMENT,Uses raw StatefulWidget + Repository instantiation instead of Riverpod
+Habits,Habit Listing & Creation,COMPLETE,COMPLETE,COMPLETE,COMPLETE,PARTIALLY COMPLETE,COMPLETE,Create habit with description and daily streak tracking
+Habits,Habit Daily Toggle,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Single completion per day enforced by database unique index
+Habits,Habit Edit & Delete,NOT STARTED,COMPLETE,COMPLETE,NOT STARTED,BACKEND ONLY,PARTIALLY COMPLETE,Backend has PUT/DELETE; Flutter UI and repository lack methods
+Habits,Habit Architecture / State,NEEDS IMPROVEMENT,COMPLETE,COMPLETE,NEEDS IMPROVEMENT,NOT STARTED,NEEDS IMPROVEMENT,Uses raw StatefulWidget + Repository instantiation instead of Riverpod
+Streaks and Achievements,Streak Calculation Engine,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Deterministic calculation based on habit completions history
+Streaks and Achievements,Achievement System,COMPLETE,COMPLETE,COMPLETE,COMPLETE,PARTIALLY COMPLETE,COMPLETE,12 predefined achievements with unlock evaluation and XP bonus
+Gamification,XP Ledger & Transactions,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Append-only ledger with idempotent unique index
+Gamification,Level & XP Calculation,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,COMPLETE,Exponential leveling formula (levels 1-50) with UI progress bars
+Analytics,Analytics Aggregate Queries,NOT STARTED,COMPLETE,COMPLETE,BACKEND ONLY,BACKEND ONLY,BACKEND ONLY,Backend summary/daily/weekly APIs exist; Flutter has models/repo but no screen
+Notifications,Local Reminders,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,No local notification package or background scheduling
+Notifications,Push Notifications,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,No Firebase Cloud Messaging or APNS infrastructure
+Study Groups,Virtual Classroom Room Join,PARTIALLY COMPLETE,COMPLETE,COMPLETE,PARTIALLY COMPLETE,PARTIALLY COMPLETE,PARTIALLY COMPLETE,12-seat room with seat assignment and ping heartbeat
+Study Groups,Realtime Presence / Video,NEEDS IMPROVEMENT,PARTIALLY COMPLETE,PARTIALLY COMPLETE,NEEDS IMPROVEMENT,PARTIALLY COMPLETE,NEEDS IMPROVEMENT,Uses 10s/20s HTTP polling and external Jitsi Meet URL launch
+Realtime Features,WebSockets / SignalR,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,No persistent bidirectional websocket connection
+Chat,In-room / Direct Messaging,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,No chat models, controllers, or UI
+Leaderboards,Global / Group Leaderboards,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,Only individual user stats exist
+Exams and Syllabus,Exam Tracker & Syllabus Breakdown,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,Module does not exist
+Friends,Friend Request & Activity Feed,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,Module does not exist
+Camera Study Mode,Presence / Focus Detection,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,Module does not exist
+Document Scanner,OCR & Notes Scanning,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,Module does not exist
+AI Study Assistant,Flashcards / Quiz / Tutor,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,Module does not exist
+Community,Public Forums & Decks,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,Module does not exist
+Subscription,In-App Purchases & Tiers,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,Module does not exist
+Administration,Admin Dashboard & Moderation,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,NOT STARTED,Module does not exist
+Settings,Preferences & Security,PARTIALLY COMPLETE,COMPLETE,COMPLETE,PARTIALLY COMPLETE,NOT STARTED,PARTIALLY COMPLETE,Account deletion works; theme and notifications are placeholder stubs

@@ -1,20 +1,22 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/network_client.dart';
 import '../../data/models/study_session_model.dart';
 import '../../data/repositories/study_session_repository.dart';
 import '../../../daily_goals/presentation/screens/daily_goals_screen.dart';
+import '../../../subjects/presentation/providers/subjects_provider.dart';
 
-class TimerScreen extends StatefulWidget {
+class TimerScreen extends ConsumerStatefulWidget {
   final StudySessionRepository? repository;
 
   const TimerScreen({super.key, this.repository});
 
   @override
-  State<TimerScreen> createState() => _TimerScreenState();
+  ConsumerState<TimerScreen> createState() => _TimerScreenState();
 }
 
-class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
+class _TimerScreenState extends ConsumerState<TimerScreen> with WidgetsBindingObserver {
   late final StudySessionRepository _repository;
   List<StudySession> _sessions = [];
   bool _isLoading = true;
@@ -26,6 +28,8 @@ class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
   bool _isRunning = false;
   bool _isPomodoro = false;
   static const int _pomodoroDuration = 25 * 60; // 25 minutes
+
+  String? _selectedSubjectId;
 
   final TextEditingController _titleController = TextEditingController(text: "Focus Session");
 
@@ -97,6 +101,7 @@ class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
           _timer?.cancel();
           _activeSession = activeSession;
           _titleController.text = activeSession.title;
+          _selectedSubjectId = activeSession.subjectId;
           
           _isPomodoro = false;
           _elapsedSeconds = activeSession.elapsedSeconds;
@@ -129,7 +134,10 @@ class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
 
     setState(() => _isActionLoading = true);
     try {
-      final session = await _repository.startSession(title);
+      final session = await _repository.startSession(
+        title,
+        subjectId: _selectedSubjectId,
+      );
       if (!mounted) return;
       setState(() {
         _timer?.cancel();
@@ -203,14 +211,11 @@ class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
         _elapsedSeconds = 0;
       });
       _loadSessions();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Session completed & saved!')),
-      );
     } catch (e) {
       if (!mounted) return;
       final message = e.toString().replaceFirst('Exception: ', '');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to end session: $message')),
+        SnackBar(content: Text(message)),
       );
     } finally {
       if (mounted) {
@@ -222,14 +227,17 @@ class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
   void _startTimer() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) return;
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
       setState(() {
         if (_isPomodoro) {
           if (_elapsedSeconds > 0) {
             _elapsedSeconds--;
           } else {
-            // Pomodoro finished
-            _endSession();
+            _timer?.cancel();
+            _isRunning = false;
           }
         } else {
           _elapsedSeconds++;
@@ -239,13 +247,9 @@ class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
   }
 
   String get _formattedTime {
-    final hours = _elapsedSeconds ~/ 3600;
-    final minutes = (_elapsedSeconds % 3600) ~/ 60;
-    final seconds = _elapsedSeconds % 60;
-    if (hours > 0) {
-      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-    }
-    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    final minutes = (_elapsedSeconds ~/ 60).toString().padLeft(2, '0');
+    final seconds = (_elapsedSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
   }
 
   @override
@@ -341,10 +345,92 @@ class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
                   ),
                 ),
               ),
+              if (_activeSession?.subjectName != null && _activeSession!.subjectName!.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  _activeSession!.subjectName!,
+                  style: const TextStyle(color: Color(0xFF00D9C0), fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ],
             ],
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildSubjectPicker() {
+    final subjectsAsync = ref.watch(subjectsProvider);
+
+    return subjectsAsync.when(
+      data: (subjects) {
+        if (subjects.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Text('Subject', style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('None'),
+                      selected: _selectedSubjectId == null,
+                      onSelected: (selected) {
+                        if (selected) setState(() => _selectedSubjectId = null);
+                      },
+                      selectedColor: const Color(0xFF6C5CE7),
+                      backgroundColor: Colors.white12,
+                      labelStyle: TextStyle(
+                        color: _selectedSubjectId == null ? Colors.white : Colors.white54,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ...subjects.map((subject) {
+                      final isSelected = _selectedSubjectId == subject.id;
+                      Color chipColor = const Color(0xFF6C5CE7);
+                      if (subject.colorHex != null && subject.colorHex!.isNotEmpty) {
+                        try {
+                          final hex = subject.colorHex!.replaceAll('#', '');
+                          chipColor = Color(int.parse('FF$hex', radix: 16));
+                        } catch (_) {}
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8.0),
+                        child: ChoiceChip(
+                          avatar: CircleAvatar(backgroundColor: chipColor, radius: 5),
+                          label: Text(subject.name),
+                          selected: isSelected,
+                          onSelected: (selected) {
+                            setState(() {
+                              _selectedSubjectId = selected ? subject.id : null;
+                            });
+                          },
+                          selectedColor: chipColor.withOpacity(0.35),
+                          backgroundColor: Colors.white12,
+                          side: isSelected ? BorderSide(color: chipColor, width: 1.5) : BorderSide.none,
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.white : Colors.white70,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            fontSize: 12,
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 
@@ -378,7 +464,9 @@ class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          _buildSubjectPicker(),
+          const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 40),
             child: TextField(
@@ -458,10 +546,14 @@ class _TimerScreenState extends State<TimerScreen> with WidgetsBindingObserver {
       itemCount: _sessions.length,
       itemBuilder: (context, index) {
         final session = _sessions[index];
+        final hasSubject = session.subjectName != null && session.subjectName!.isNotEmpty;
         return ListTile(
           leading: const Icon(Icons.timer, color: Color(0xFF00D9C0)),
           title: Text(session.title, style: const TextStyle(color: Colors.white)),
-          subtitle: Text('${session.startTime.month}/${session.startTime.day} - ${session.durationMinutes} mins', style: const TextStyle(color: Colors.white54)),
+          subtitle: Text(
+            '${session.startTime.month}/${session.startTime.day} - ${session.durationMinutes} mins${hasSubject ? ' • ${session.subjectName}' : ''}',
+            style: const TextStyle(color: Colors.white54),
+          ),
           trailing: const Icon(Icons.check_circle, color: Color(0xFF00D9C0), size: 16),
         );
       },

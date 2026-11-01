@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 import 'package:mind_on_track/core/network_client.dart';
 import 'package:mind_on_track/features/timer/data/models/study_session_model.dart';
@@ -221,6 +222,44 @@ void main() {
         throwsA(predicate((e) => e.toString().contains('Session is already paused.'))),
       );
     });
+
+    test('startSession sends POST to /studysessions/start with subjectId when provided', () async {
+      String? requestedPath;
+      String? requestedMethod;
+      dynamic requestBody;
+
+      final mockClient = MockNetworkClient((options) async {
+        requestedPath = options.path;
+        requestedMethod = options.method;
+        requestBody = options.data;
+        return Response(
+          requestOptions: options,
+          statusCode: 200,
+          data: {
+            'id': 'sess-new-1',
+            'title': 'Calculus',
+            'subjectId': 'sub-math-123',
+            'subjectName': 'Mathematics',
+            'startTime': '2026-10-14T10:00:00Z',
+            'durationMinutes': 0,
+            'isCompleted': false,
+            'isPaused': false,
+            'accumulatedSeconds': 0,
+            'elapsedSeconds': 0,
+          },
+        );
+      });
+
+      final repository = StudySessionRepository(mockClient);
+      final result = await repository.startSession('Calculus', subjectId: 'sub-math-123');
+
+      expect(requestedPath, 'studysessions/start');
+      expect(requestedMethod, 'POST');
+      expect(requestBody, {'title': 'Calculus', 'subjectId': 'sub-math-123'});
+      expect(result.id, 'sess-new-1');
+      expect(result.subjectId, 'sub-math-123');
+      expect(result.subjectName, 'Mathematics');
+    });
   });
 
   group('TimerScreen Widget Tests', () {
@@ -228,8 +267,10 @@ void main() {
       final fakeRepo = FakeStudySessionRepository();
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: TimerScreen(repository: fakeRepo),
+        ProviderScope(
+          child: MaterialApp(
+            home: TimerScreen(repository: fakeRepo),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -255,8 +296,10 @@ void main() {
       final fakeRepo = FakeStudySessionRepository(activeSession: active);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: TimerScreen(repository: fakeRepo),
+        ProviderScope(
+          child: MaterialApp(
+            home: TimerScreen(repository: fakeRepo),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -281,8 +324,10 @@ void main() {
       final fakeRepo = FakeStudySessionRepository(activeSession: active);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: TimerScreen(repository: fakeRepo),
+        ProviderScope(
+          child: MaterialApp(
+            home: TimerScreen(repository: fakeRepo),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -319,8 +364,10 @@ void main() {
       final fakeRepo = FakeStudySessionRepository(activeSession: active);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: TimerScreen(repository: fakeRepo),
+        ProviderScope(
+          child: MaterialApp(
+            home: TimerScreen(repository: fakeRepo),
+          ),
         ),
       );
       await tester.pumpAndSettle();

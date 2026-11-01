@@ -63,8 +63,20 @@ builder.Services.AddCors(options =>
 });
 
 var connectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING") 
-                       ?? builder.Configuration.GetConnectionString("DefaultConnection") 
-                       ?? throw new InvalidOperationException("Connection string not found.");
+                       ?? builder.Configuration.GetConnectionString("DefaultConnection");
+
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    if (builder.Environment.IsDevelopment())
+    {
+        connectionString = "Server=localhost;Port=3306;Database=mindontrack_dev;";
+    }
+    else
+    {
+        throw new InvalidOperationException("Connection string not found in DB_CONNECTION_STRING environment variable or configuration.");
+    }
+}
+
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseMySql(connectionString, ServerVersion.Parse("10.11.18-mariadb")));
 builder.Services.AddScoped<MOT.Application.Common.Interfaces.IAppDbContext>(provider => provider.GetRequiredService<AppDbContext>());
@@ -86,8 +98,21 @@ builder.Services.AddMediatR(cfg =>
 });
 builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
 
-var jwtSecret = builder.Configuration["Jwt:Secret"] 
-                ?? throw new InvalidOperationException("JWT Secret is not configured in configuration or environment.");
+var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET")
+                ?? builder.Configuration["Jwt:Secret"];
+
+if (string.IsNullOrWhiteSpace(jwtSecret))
+{
+    if (builder.Environment.IsDevelopment())
+    {
+        jwtSecret = "DevelopmentOnlyLocalSecretKeyDoNotUseInProduction123!@#";
+    }
+    else
+    {
+        throw new InvalidOperationException("JWT Secret is not configured in JWT_SECRET environment variable or configuration.");
+    }
+}
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {

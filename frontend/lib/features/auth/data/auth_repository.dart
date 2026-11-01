@@ -107,6 +107,17 @@ class AuthRepository {
     }
   }
 
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    try {
+      await _networkClient.dio.post('auth/change-password', data: {
+        'currentPassword': currentPassword,
+        'newPassword': newPassword,
+      });
+    } on DioException catch (e) {
+      throw Exception(_extractErrorMessage(e, 'Failed to change password'));
+    }
+  }
+
   Future<void> deleteAccount(String password) async {
     try {
       await _networkClient.dio.delete('auth/account', data: {
@@ -125,7 +136,6 @@ class AuthRepository {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('jwt_token');
   }
-
 
   Future<bool> isAuthenticated() async {
     final prefs = await SharedPreferences.getInstance();

@@ -122,5 +122,25 @@ void main() {
       expect(json['accumulatedSeconds'], 600);
       expect(json['elapsedSeconds'], 600);
     });
+
+    test('fromJson and toJson handle subjectId and subjectName faithfully', () {
+      final json = {
+        'id': 'sess-subj-1',
+        'title': 'Math Session',
+        'subjectId': 'sub-guid-123',
+        'subjectName': 'Mathematics',
+        'startTime': '2026-10-14T09:00:00Z',
+        'durationMinutes': 30,
+        'isCompleted': true,
+      };
+
+      final session = StudySession.fromJson(json);
+      expect(session.subjectId, 'sub-guid-123');
+      expect(session.subjectName, 'Mathematics');
+
+      final serialized = session.toJson();
+      expect(serialized['subjectId'], 'sub-guid-123');
+      expect(serialized['subjectName'], 'Mathematics');
+    });
   });
 }

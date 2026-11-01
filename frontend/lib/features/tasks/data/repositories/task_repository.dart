@@ -17,17 +17,55 @@ class TaskRepository {
     }
   }
 
-  Future<void> createTask(String title, String? description) async {
+  Future<DailyTask> createTask(String title, String? description) async {
     try {
-      await _networkClient.dio.post(
+      final response = await _networkClient.dio.post(
         'tasks',
         data: {
           'title': title,
           'description': description,
         },
       );
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        return DailyTask.fromJson(data);
+      }
+      return DailyTask(
+        id: data is Map && data['id'] != null ? data['id'].toString() : '',
+        title: title,
+        description: description,
+        isCompleted: false,
+        createdAt: DateTime.now(),
+      );
     } on DioException catch (e) {
       throw Exception(_extractErrorMessage(e, 'Failed to create task'));
+    }
+  }
+
+  Future<DailyTask> updateTask(String id, String title, String? description, {bool? isCompleted}) async {
+    try {
+      final payload = <String, dynamic>{
+        'title': title,
+        'description': description,
+      };
+      if (isCompleted != null) {
+        payload['isCompleted'] = isCompleted;
+      }
+      final response = await _networkClient.dio.put(
+        'tasks/$id',
+        data: payload,
+      );
+      return DailyTask.fromJson(response.data);
+    } on DioException catch (e) {
+      throw Exception(_extractErrorMessage(e, 'Failed to update task'));
+    }
+  }
+
+  Future<void> deleteTask(String id) async {
+    try {
+      await _networkClient.dio.delete('tasks/$id');
+    } on DioException catch (e) {
+      throw Exception(_extractErrorMessage(e, 'Failed to delete task'));
     }
   }
 

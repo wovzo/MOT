@@ -1,6 +1,8 @@
 class StudySession {
   final String id;
   final String title;
+  final String? subjectId;
+  final String? subjectName;
   final DateTime startTime;
   final DateTime? endTime;
   final int durationMinutes;
@@ -13,6 +15,8 @@ class StudySession {
   StudySession({
     required this.id,
     required this.title,
+    this.subjectId,
+    this.subjectName,
     required this.startTime,
     this.endTime,
     required this.durationMinutes,
@@ -33,6 +37,8 @@ class StudySession {
     return StudySession(
       id: json['id']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
+      subjectId: json['subjectId']?.toString(),
+      subjectName: json['subjectName']?.toString(),
       startTime: DateTime.parse(json['startTime']).toLocal(),
       endTime: json['endTime'] != null ? DateTime.parse(json['endTime']).toLocal() : null,
       durationMinutes: durationMins,
@@ -48,6 +54,8 @@ class StudySession {
     return {
       'id': id,
       'title': title,
+      'subjectId': subjectId,
+      'subjectName': subjectName,
       'startTime': startTime.toIso8601String(),
       'endTime': endTime?.toIso8601String(),
       'durationMinutes': durationMinutes,

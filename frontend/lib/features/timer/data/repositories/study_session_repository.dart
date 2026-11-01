@@ -32,11 +32,15 @@ class StudySessionRepository {
     }
   }
 
-  Future<StudySession> startSession(String title) async {
+  Future<StudySession> startSession(String title, {String? subjectId}) async {
     try {
+      final payload = <String, dynamic>{'title': title};
+      if (subjectId != null && subjectId.isNotEmpty) {
+        payload['subjectId'] = subjectId;
+      }
       final response = await _networkClient.dio.post(
         'studysessions/start',
-        data: {'title': title},
+        data: payload,
       );
       return StudySession.fromJson(response.data);
     } on DioException catch (e) {

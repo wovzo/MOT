@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
@@ -29,6 +29,90 @@ class ProfileScreen extends ConsumerWidget {
         (route) => false,
       );
     }
+  }
+
+  void _showEditProfileDialog(BuildContext context, WidgetRef ref, String currentName) {
+    final controller = TextEditingController(text: currentName);
+    bool isLoading = false;
+    String? errorMessage;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1A38),
+          title: const Text('Edit Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Display Name',
+                  labelStyle: const TextStyle(color: Colors.white54),
+                  errorText: errorMessage,
+                  enabledBorder: OutlineInputBorder(
+                    borderSide: const BorderSide(color: Colors.white24),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: const BorderSide(color: AppTheme.focusPurple),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+              if (isLoading) ...[
+                const SizedBox(height: 16),
+                const Center(child: CircularProgressIndicator(color: AppTheme.focusPurple)),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: isLoading ? null : () => Navigator.pop(dialogContext),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.focusPurple),
+              onPressed: isLoading
+                  ? null
+                  : () async {
+                      final newName = controller.text.trim();
+                      if (newName.isEmpty) {
+                        setState(() => errorMessage = 'Display name cannot be empty.');
+                        return;
+                      }
+                      setState(() {
+                        isLoading = true;
+                        errorMessage = null;
+                      });
+
+                      try {
+                        final authRepo = ref.read(authRepositoryProvider);
+                        await authRepo.updateProfile(newName);
+                        ref.invalidate(userProfileProvider);
+                        if (dialogContext.mounted) Navigator.pop(dialogContext);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Profile updated successfully.')),
+                          );
+                        }
+                      } catch (e) {
+                        if (dialogContext.mounted) {
+                          setState(() {
+                            isLoading = false;
+                            errorMessage = e.toString().replaceFirst('Exception: ', '');
+                          });
+                        }
+                      }
+                    },
+              child: const Text('Save', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -112,9 +196,20 @@ class ProfileScreen extends ConsumerWidget {
                   child: Icon(Icons.person_rounded, size: 50, color: Colors.white),
                 ),
                 const SizedBox(height: 16),
-                Text(
-                  profile.displayName.isNotEmpty ? profile.displayName : 'User',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      profile.displayName.isNotEmpty ? profile.displayName : 'User',
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.edit, size: 18, color: Colors.white54),
+                      tooltip: 'Edit Name',
+                      onPressed: () => _showEditProfileDialog(context, ref, profile.displayName),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 4),
                 Text(
